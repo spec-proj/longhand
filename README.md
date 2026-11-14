@@ -20,8 +20,6 @@ _Longhand isn't notarised, so macOS asks before opening it the first time. Open 
 
 Contribute: [Building Longhand](CONTRIBUTING.md).
 
----
-
 ## Coming Soon
 - Screenplay formatting and export, including .fdx.
 - Scene-less documents for shorter works.
