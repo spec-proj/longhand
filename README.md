@@ -2,24 +2,33 @@
 
 ![Longhand: Write where you are.](docs/images/readme-banner.jpg)
 
-A writing app for fiction, essays and more, saved as .md files and tracked with Git. Free, for Mac (macOS 26 or later).
+A writing app for fiction, essays and more, saved as .md files and tracked with Git.
 
-**Download:** [the latest release](https://github.com/spec-proj/longhand/releases/latest) · **Website:** [spec-proj.github.io/longhand](https://spec-proj.github.io/longhand/)
+**Download:** [the latest release](https://github.com/spec-proj/longhand/releases/latest)
+**Screenshots:** [spec-proj.github.io/longhand](https://spec-proj.github.io/longhand/)
 
-Longhand isn't from the App Store, so macOS asks before opening it the first time. Open it once, then choose System Settings › Privacy & Security › Open Anyway.
+## Features
 
-## What it does
+- **Stories, chapters and scenes.** A 'story' is a folder of documents, with chapters broken up into scenes. (Later versions will include more short-form friendly layouts)
+- **Git for writers.** Longhand is built to use Git/hub for tracking changes, versioning, and backing up your work, whether you do so locally or online.
+- **Simple, macOS-forward design.**, mostly keyboard-operable, and includes a VS Code-style command palette. Hide or show any UI element, or clear everything to focus on writing.
+- **Typewriter scrolling, line/word focus, word count target** as well as comments and notes per scene, per chapter, and even per book. View your book or chapter in card view, rearrange your story, and switch back to read it as prose. 
+- **A beautiful library,** with folders, author profiles and (optional) cover images. You can store multiple author profiles and set pen names. Save your work in standard manuscript formats or export as .pdf or .epub.
+- **Future-proof** - your files are written in Markdown, stored as .md's and organised by the app with .json files.
 
-- **Stories, chapters and scenes.** Each scene is a plain Markdown file in a folder you choose, named and ordered so the folder reads like the book. Your writing never depends on Longhand.
-- **A chapter reads like a book**, and you can write in it directly. Comments and notes sit in the margin.
-- **Git, in plain words.** Commits, branches for rewrites, Compare with changes marked word by word, and push to GitHub, any Git server or a folder.
-- **Clear Desk, focus and typewriter scrolling**, themes, and export to Word, PDF, a print-ready book PDF and EPUB.
+_Longhand isn't notarised, so macOS asks before opening it the first time. Open it once, then choose System Settings › Privacy & Security › Open Anyway._
 
-Want to build it yourself? See [Building Longhand](CONTRIBUTING.md).
+---
+
+Contribute: [Building Longhand](CONTRIBUTING.md).
 
 ## Credits
 
-Theme colours come from the projects listed in `third_party/THEMES.md`. The website's photographs are from NASA on The Commons. Its screenshots show Jane Austen's novels, from Project Gutenberg.
+Themes: `third_party/THEMES.md`. 
+Photographs: NASA. 
+Text: Jane Austen, from Project Gutenberg.
+
+This is a vibe-coded project. I am not a developer, I just have a Claude license from work and refuse to pay for Ulysses or Scrivener. I wanted something that blended the two and decided to just go for it. If the code sucks, let me know!
 
 ## Licence
 
