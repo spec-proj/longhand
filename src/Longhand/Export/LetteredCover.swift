@@ -174,6 +174,7 @@ enum LetteredCover {
         case .novella: return "a novella"
         case .shortStory: return "a short story"
         case .essay: return "an essay"
+        case .screenplay: return "a screenplay"
         case .notebook, nil: return nil
         }
     }

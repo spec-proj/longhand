@@ -166,9 +166,10 @@ enum BookStage: String, Codable, CaseIterable, Identifiable {
 }
 
 /// What kind of writing a story is (owner, 2026-11-13): the fiction lengths, longest first, then
-/// essays and notebooks. Stored by name, so the order can change without touching saved stories.
+/// essays, screenplays (2026-11-14) and notebooks. Stored by name, so the order can change
+/// without touching saved stories.
 enum BookForm: String, Codable, CaseIterable, Identifiable {
-    case novel, novella, shortStory, essay, notebook
+    case novel, novella, shortStory, essay, screenplay, notebook
     var id: String { rawValue }
     var title: String {
         switch self {
@@ -176,6 +177,7 @@ enum BookForm: String, Codable, CaseIterable, Identifiable {
         case .novella: return "Novella"
         case .shortStory: return "Short Story"
         case .essay: return "Essay"
+        case .screenplay: return "Screenplay"
         case .notebook: return "Notebook"
         }
     }
@@ -230,6 +232,15 @@ final class MarginStore: ObservableObject {
     private(set) var comments: [SceneComment] = []
     /// The comment being worked on: its card is raised and its passage highlighted more.
     @Published var focused: UUID?
+
+    /// Where you were as ⌘R switched between Write and Read (owner, 2026-11-14: "cmd-r should
+    /// retain where the user is"): places in scenes' own text, the first character on show and
+    /// the caret. The page that opens next goes there and forgets it.
+    struct ReadingAnchor {
+        var top: (scene: URL, location: Int)?
+        var caret: (scene: URL, location: Int)?
+    }
+    var readingAnchor: ReadingAnchor?
     /// A passage chosen from its change bar on the page, shown in the Changes tab.
     @Published var changeFocus: ChangeBar?
 
@@ -281,7 +292,7 @@ final class MarginStore: ObservableObject {
         let base = root.path + "/"
         guard url.path.hasPrefix(base) else { return nil }
         var relative = String(url.path.dropFirst(base.count))
-        if relative.lowercased().hasSuffix(".md") { relative.removeLast(3) }
+        relative = ProseFile.base(relative)
         return relative
     }
 

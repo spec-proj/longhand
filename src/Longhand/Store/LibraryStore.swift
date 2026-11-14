@@ -40,6 +40,8 @@ final class LibraryStore: ObservableObject {
     /// under the page only.
     let live = LiveCount()
     @Published private(set) var wordCounts: [URL: Int] = [:]
+    /// A screenplay's length in pages (its own measure), brought up to date at each save.
+    @Published private(set) var pageCounts: [URL: Int] = [:]
     private(set) var saveState: SaveState = .idle
     @Published private(set) var libraryURL: URL?
     @Published var errorMessage: String?
@@ -146,9 +148,29 @@ final class LibraryStore: ObservableObject {
         activeSceneURL = nil
         setText("")
         selection = nil
-        reload(select: .firstScene)
-        // Back to what was open last time, if it's still there.
-        if let last = places.lastOpened, contains(last) { selection = last }
+        // Hidden test runs and pictures start on the first scene, as they always have.
+        guard !Snapshot.isBackgroundRun else {
+            reload(select: .firstScene)
+            if let last = places.lastOpened, contains(last) { selection = last }
+            return
+        }
+        reload(select: .none)
+        openOnLibrary()
+    }
+
+    /// Opening a library shows the Library (owner, 2026-11-14: "opening the app should take you
+    /// to the library"), with the story you were last in chosen, its page beside the list.
+    /// Going in finds your place in each scene as before.
+    func openOnLibrary() {
+        let last = places.lastOpened.flatMap { opened -> Book? in
+            switch opened {
+            case .book(let url): return book(for: url)
+            case .chapter(let url): return library?.books.first { $0.chapters.contains { $0.url == url } }
+            case .scene(let url): return location(ofScene: url)?.book
+            }
+        }
+        openBook = nil
+        if let story = last ?? library?.books.first { selection = .book(story.url) }
     }
 
     private func contains(_ selection: Selection) -> Bool {
@@ -371,6 +393,7 @@ final class LibraryStore: ObservableObject {
         // Longhand): back to the Library, so New Story works and New Scene isn't offered.
         if let open = openBook, !scanned.library.books.contains(where: { $0.url == open }) { openBook = nil }
         wordCounts = scanned.counts
+        countScreenplayPages()
         reloadCount += 1
         versions.scheduleChanges()
         versions.filesChanged()
@@ -444,7 +467,8 @@ final class LibraryStore: ObservableObject {
                 )) ?? []
 
                 var scenes: [Scene] = []
-                for rawSceneURL in sceneURLs where rawSceneURL.pathExtension.lowercased() == "md" {
+                // In a chapter, Markdown only: a screenplay is a story of its own (one file).
+                for rawSceneURL in sceneURLs where rawSceneURL.pathExtension.lowercased() == ProseFile.markdown {
                     let sceneURL = rawSceneURL.canonical
                     let sceneName = FileNaming.decode(sceneURL.deletingPathExtension().lastPathComponent)
                     let content = read(sceneURL)
@@ -470,7 +494,11 @@ final class LibraryStore: ObservableObject {
                 // Scenes only, or one document: Markdown files straight in the story's folder,
                 // read as the scenes of an implicit chapter that is the story's folder itself.
                 var scenes: [Scene] = []
-                for rawSceneURL in chapterURLs where rawSceneURL.pathExtension.lowercased() == "md" && !isDirectory(rawSceneURL) {
+                // A Fountain file counts only as the story's one document (a screenplay), never
+                // beside other files: every other view treats a story's files as Markdown.
+                let loose = chapterURLs.filter { ProseFile.isProse($0) && !isDirectory($0) }
+                let usable = loose.count == 1 ? loose : loose.filter { $0.pathExtension.lowercased() == ProseFile.markdown }
+                for rawSceneURL in usable {
                     let sceneURL = rawSceneURL.canonical
                     let sceneName = FileNaming.decode(sceneURL.deletingPathExtension().lastPathComponent)
                     counts[sceneURL] = Self.wordCount(read(sceneURL))
@@ -547,6 +575,49 @@ final class LibraryStore: ObservableObject {
         String.prose(at: url) ?? ""
     }
 
+    /// Setting a long script on pages takes tens of milliseconds: never on the main thread.
+    private static let pageQueue = DispatchQueue(label: "longhand.screenplay-pages", qos: .utility)
+
+    /// Pages of every screenplay in the library, read from disk.
+    private func countScreenplayPages() {
+        let scripts = (library?.books ?? []).compactMap { $0.isScreenplay ? $0.document?.url : nil }
+        guard !scripts.isEmpty || !pageCounts.isEmpty else { return }
+        // The open one as it is on screen; the rest read from disk, off the main thread.
+        let open = activeSceneURL.map { ($0, text) }
+        Self.pageQueue.async {
+            var pages: [URL: Int] = [:]
+            for url in scripts {
+                let text = open?.0 == url ? open!.1 : (String.prose(at: url) ?? "")
+                pages[url] = ScreenplayLayout.pageCount(text)
+            }
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                if pages != self.pageCounts { self.pageCounts = pages }
+            }
+        }
+    }
+
+    private func countPages(_ url: URL, text: String) {
+        guard url.pathExtension.lowercased() == ProseFile.fountain else { return }
+        Self.pageQueue.async {
+            let pages = ScreenplayLayout.pageCount(text)
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                if self.pageCounts[url] != pages { self.pageCounts[url] = pages }
+            }
+        }
+    }
+
+    /// A screenplay's pages ("14 pages").
+    func pages(of scene: Scene) -> Int { pageCounts[scene.url] ?? 0 }
+
+    /// What a story's target counts (owner, 2026-11-14): pages for a screenplay, words for
+    /// anything else. The target itself is one number either way (`SceneInfo.target`).
+    func targetProgress(of book: Book) -> (done: Int, unit: String) {
+        if book.isScreenplay, let script = book.document { return (pages(of: script), "pages") }
+        return (wordCount(of: book), "words")
+    }
+
     // MARK: - Editing and autosave
 
     /// The open scene's text changed. `fromEditor` is true when the editor itself reports
@@ -610,6 +681,7 @@ final class LibraryStore: ObservableObject {
                 history.keepBeforeWriting(url, newText: text)
                 try text.write(to: url, atomically: true, encoding: .utf8)
                 counts[url] = live.words
+                countPages(url, text: text)
             } catch {
                 failed = true
             }
@@ -643,6 +715,7 @@ final class LibraryStore: ObservableObject {
         let contents = read(url)
         setText(contents)
         wordCounts[url] = live.words
+        countPages(url, text: contents)
         saveState = .idle
     }
 
@@ -735,7 +808,8 @@ final class LibraryStore: ObservableObject {
             case .scenes:
                 sceneURL = try createSceneFile(in: bookURL, title: "Untitled \(names.scene)", order: 1)
             case .document:
-                sceneURL = try createSceneFile(in: bookURL, title: FileNaming.decode(bookURL.lastPathComponent).title, order: nil)
+                sceneURL = try createSceneFile(in: bookURL, title: FileNaming.decode(bookURL.lastPathComponent).title, order: nil,
+                                               extension: form == .screenplay ? ProseFile.fountain : ProseFile.markdown)
             }
             var info = margin.info(for: bookURL)
             info.form = form
@@ -747,6 +821,24 @@ final class LibraryStore: ObservableObject {
         } catch {
             errorMessage = "Couldn’t create a story."
         }
+    }
+
+    /// A new screenplay story holding `text` (Fountain), opened. Returns its script's file.
+    @discardableResult
+    func createScreenplay(title: String, text: String) -> URL? {
+        createBook(title: title, form: .screenplay, shape: .document)
+        guard case .scene(let url) = selection, url.pathExtension.lowercased() == ProseFile.fountain else { return nil }
+        do {
+            try text.write(to: url, atomically: true, encoding: .utf8)
+        } catch {
+            errorMessage = "Couldn’t write the screenplay."
+            return nil
+        }
+        reload(select: .keep)
+        if activeSceneURL == url { setText(text) }
+        countPages(url, text: text)
+        versions.filesChanged()
+        return url
     }
 
     // MARK: - Folders
@@ -903,9 +995,9 @@ final class LibraryStore: ObservableObject {
 
     /// A new Markdown file. Without an order its name is just the title (a single document's
     /// file, or a chapters-only chapter's).
-    private func createSceneFile(in chapterURL: URL, title: String, order: Int?) throws -> URL {
+    private func createSceneFile(in chapterURL: URL, title: String, order: Int?, extension ext: String = ProseFile.markdown) throws -> URL {
         let name = order.map { FileNaming.name(order: $0, title: title) } ?? FileNaming.sanitized(title)
-        let url = FileNaming.unique(chapterURL.appendingPathComponent(name + ".md"))
+        let url = FileNaming.unique(chapterURL.appendingPathComponent(name + "." + ext))
         try "".write(to: url, atomically: true, encoding: .utf8)
         return url.canonical
     }
@@ -932,7 +1024,7 @@ final class LibraryStore: ObservableObject {
             let newURL = try renameFile(item.url, kind: item.kind, order: item.order, title: trimmed)
             var moves: [(from: URL, to: URL)] = []
             if let inner, let carried = Self.relocated(inner, from: item.url, to: newURL) {
-                let named = FileNaming.unique(carried.deletingLastPathComponent().appendingPathComponent(FileNaming.sanitized(trimmed) + ".md"))
+                let named = FileNaming.unique(carried.deletingLastPathComponent().appendingPathComponent(FileNaming.sanitized(trimmed) + "." + carried.pathExtension))
                 if named.lastPathComponent != carried.lastPathComponent, (try? FileManager.default.moveItem(at: carried, to: named)) != nil {
                     // First, so the file's own move wins over its folder's.
                     moves.append((inner, named.canonical))
@@ -956,8 +1048,9 @@ final class LibraryStore: ObservableObject {
 
         // Park the first item under a hidden name while the two swap, so two items with the
         // same title keep that title instead of one becoming "… 2".
+        // A scene's parked name keeps its extension (.md or .fountain): renaming reads it.
         let parked = item.url.deletingLastPathComponent()
-            .appendingPathComponent(".longhand-moving-\(UUID().uuidString)")
+            .appendingPathComponent(".longhand-moving-\(UUID().uuidString)" + (item.kind == .scene ? "." + item.url.pathExtension : ""))
         var moves: [(from: URL, to: URL)] = []
         do {
             try FileManager.default.moveItem(at: item.url, to: parked)
@@ -1025,12 +1118,12 @@ final class LibraryStore: ObservableObject {
         var moves: [(from: URL, to: URL)] = []
         do {
             for plan in plans {
-                let temp = plan.folder.appendingPathComponent(".longhand-moving-\(UUID().uuidString).md")
+                let temp = plan.folder.appendingPathComponent(".longhand-moving-\(UUID().uuidString).\(plan.scene.url.pathExtension)")
                 try fm.moveItem(at: plan.scene.url, to: temp)
                 parked.append((plan.scene, temp, plan.folder, plan.order))
             }
             for item in parked {
-                let name = FileNaming.name(order: item.order, title: item.scene.title) + ".md"
+                let name = FileNaming.name(order: item.order, title: item.scene.title) + "." + item.scene.url.pathExtension
                 let destination = FileNaming.unique(item.folder.appendingPathComponent(name))
                 try fm.moveItem(at: item.temp, to: destination)
                 moves.append((item.scene.url, destination.canonical))
@@ -1039,7 +1132,7 @@ final class LibraryStore: ObservableObject {
         } catch {
             // Put anything still parked back under a visible name, so nothing is hidden.
             for item in parked where fm.fileExists(atPath: item.temp.path) {
-                let name = FileNaming.name(order: item.order, title: item.scene.title) + ".md"
+                let name = FileNaming.name(order: item.order, title: item.scene.title) + "." + item.scene.url.pathExtension
                 let destination = FileNaming.unique(item.folder.appendingPathComponent(name))
                 if (try? fm.moveItem(at: item.temp, to: destination)) != nil {
                     moves.append((item.scene.url, destination.canonical))
@@ -1214,7 +1307,7 @@ final class LibraryStore: ObservableObject {
     @discardableResult
     private func renameFile(_ url: URL, kind: ItemKind, order: Int, title: String) throws -> URL {
         let base = FileNaming.name(order: order, title: title)
-        let name = kind == .scene ? base + ".md" : base
+        let name = kind == .scene ? base + "." + url.pathExtension : base
         let proposed = url.deletingLastPathComponent().appendingPathComponent(name)
 
         if proposed.standardizedFileURL == url.standardizedFileURL { return url }
@@ -1487,6 +1580,18 @@ final class LibraryStore: ObservableObject {
     /// ⇧⌘L, the document switcher (`SceneSwitcher(documents: true)`): every story.
     @Published var documentSwitcherShown = false
 
+    /// Back to the Library (‹ Library, ⌘4, the path's first place): the story you were in is
+    /// chosen there, its page shown, rather than its text staying open beside the list
+    /// (owner, 2026-11-14).
+    func showLibrary() {
+        let story = openBook ?? contextBook?.url
+        saveNow()
+        openBook = nil
+        if let story, library?.books.contains(where: { $0.url == story }) == true, selection != .book(story) {
+            selection = .book(story)
+        }
+    }
+
     /// Goes into a story where you last were: the scene last open in it, else its single
     /// document or first scene, else its page.
     func openDocument(_ url: URL) {
@@ -1685,6 +1790,12 @@ final class LibraryStore: ObservableObject {
 final class LiveCount: ObservableObject {
     @Published private(set) var words = 0
     @Published private(set) var characters = 0
+    /// In a screenplay: the element the caret is in ("Dialogue"); nil elsewhere.
+    @Published private(set) var element: String?
+
+    func setElement(_ name: String?) {
+        if name != element { element = name }
+    }
 
     func update(_ text: String) {
         let string = text as NSString

@@ -165,10 +165,11 @@ struct QuickOpen: View {
         var list: [Item] = store.openBook != nil
             ? (store.canAddScene ? [command("New \(store.contextNames.scene)", "⌘N") { store.createSceneInContext() }] : [])
                 + (store.canAddChapter ? [command("New \(store.contextNames.chapter)", "⇧⌘N") { store.createChapterInContext() }] : [])
-                + [command("Back to Library", "⌘4") { store.openBook = nil }]
+                + [command("Back to Library", "⌘4") { store.showLibrary() }]
             : [
                 command("New Document…", "⌥⌘N") { store.newDocumentShown = true },
                 command("New Folder") { store.createFolder() },
+                command("Import Final Draft…") { store.importFinalDraft() },
             ]
         list += [
             command("Switch Scene…", "⌘L") { store.switcherShown = true },
@@ -186,6 +187,12 @@ struct QuickOpen: View {
             list.append(command("Toggle Contents / Page", "⌘R") {
                 defaults.set(false, forKey: "showCards")
                 defaults.set(!page, forKey: StoryPage.key)
+            })
+        }
+        if case .scene(let url) = store.selection, url.pathExtension.lowercased() == ProseFile.fountain {
+            let reading = defaults.bool(forKey: ScreenplayReader.readingKey)
+            list.append(command("Toggle Read / Write", "⌘R") {
+                defaults.set(!reading, forKey: ScreenplayReader.readingKey)
             })
         }
         if case .chapter = store.selection {

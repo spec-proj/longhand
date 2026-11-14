@@ -28,7 +28,7 @@ struct Comparison: Equatable, Sendable {
         var title: String {
             let parts = path.split(separator: "/").map(String.init)
             let names = parts.suffix(2).map { part -> String in
-                let base = part.lowercased().hasSuffix(".md") ? String(part.dropLast(3)) : part
+                let base = ProseFile.base(part)
                 return FileNaming.decode(base).title
             }
             return names.joined(separator: " › ")
@@ -55,10 +55,10 @@ extension Git {
     static func compare(_ root: URL, from: String, to: String?, now: String? = nil, workingTree: Bool = false) -> Comparison {
         let listing: Result
         if to == nil, workingTree {
-            listing = run(["diff", "-z", "--name-status", "-M", "--no-ext-diff", from, "--", "*.md"], in: root)
+            listing = run(["diff", "-z", "--name-status", "-M", "--no-ext-diff", from, "--"] + ProseFile.pathspecs, in: root)
         } else {
             guard let newer = to ?? now ?? snapshotTree(root) else { return Comparison(scenes: []) }
-            listing = run(["diff", "-z", "--name-status", "-M", "--no-ext-diff", from, newer, "--", "*.md"], in: root)
+            listing = run(["diff", "-z", "--name-status", "-M", "--no-ext-diff", from, newer, "--"] + ProseFile.pathspecs, in: root)
         }
         guard listing.ok else { return Comparison(scenes: []) }
 
@@ -96,7 +96,7 @@ extension Git {
         func key(_ path: String) -> String {
             let parts = path.split(separator: "/").map(String.init)
             guard (2...4).contains(parts.count), let last = parts.last else { return path }
-            let base = last.lowercased().hasSuffix(".md") ? String(last.dropLast(3)) : last
+            let base = ProseFile.base(last)
             return parts.dropLast().joined(separator: "/") + "/" + FileNaming.decode(base).title
         }
         var removedAt: [String: Int] = [:]
@@ -150,12 +150,12 @@ extension Git {
         let parts = path.split(separator: "/")
         guard (2...4).contains(parts.count) else { return false }
         return !parts[0].hasPrefix(".") && !parts.dropFirst().dropLast().contains("Notes")
-            && parts[parts.count - 1].lowercased().hasSuffix(".md")
+            && ProseFile.isProse(String(parts[parts.count - 1]))
     }
 
     /// Scenes Git doesn't know yet (new, or renamed since the last version).
     static func untrackedScenes(_ root: URL) -> Bool {
-        let result = run(["ls-files", "--others", "--exclude-standard", "-z", "--", "*.md"], in: root)
+        let result = run(["ls-files", "--others", "--exclude-standard", "-z", "--"] + ProseFile.pathspecs, in: root)
         return !result.ok || result.output.split(separator: "\0").contains { isScene(String($0)) }
     }
 

@@ -81,6 +81,8 @@ struct ExportSettings: Codable, Equatable {
     var typeface: Typeface = .times
     /// The lettered cover an e-book gets when its story has no cover picture; nil for none.
     var letteredCover: LetteredCover.Style?
+    /// A screenplay's choices (PDF, Final Draft or Fountain; paper; title page; numbers).
+    var screenplay = ScreenplayChoices()
     // The author, filled in from the book's Book Info page before exporting (`useAuthor`).
     // Not saved with the export choices: older libraries kept them here, and
     // `LibraryStore.adoptExportAuthor` moves them to Book Info.
@@ -94,7 +96,7 @@ struct ExportSettings: Codable, Equatable {
     init() {}
 
     private enum CodingKeys: String, CodingKey {
-        case format, trim, paper, typeface, letteredCover, name, penName, contact
+        case format, trim, paper, typeface, letteredCover, name, penName, contact, screenplay
     }
 
     func encode(to encoder: Encoder) throws {
@@ -104,6 +106,7 @@ struct ExportSettings: Codable, Equatable {
         try c.encode(paper, forKey: .paper)
         try c.encode(typeface, forKey: .typeface)
         try c.encodeIfPresent(letteredCover, forKey: .letteredCover)
+        try c.encode(screenplay, forKey: .screenplay)
     }
 
     /// The author's details from Book Info: the contact block is the address, then phone and
@@ -123,6 +126,7 @@ struct ExportSettings: Codable, Equatable {
         typeface = (try? c.decode(Typeface.self, forKey: .typeface)) ?? .times
         trim = (try? c.decode(Trim.self, forKey: .trim)) ?? .medium
         letteredCover = try? c.decode(LetteredCover.Style.self, forKey: .letteredCover)
+        screenplay = (try? c.decode(ScreenplayChoices.self, forKey: .screenplay)) ?? ScreenplayChoices()
         name = (try? c.decode(String.self, forKey: .name)) ?? ""
         penName = (try? c.decode(String.self, forKey: .penName)) ?? ""
         contact = (try? c.decode(String.self, forKey: .contact)) ?? ""

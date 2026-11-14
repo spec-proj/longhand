@@ -519,8 +519,13 @@ private struct NotesPane: View {
                 BookNoteEditor(note: note, rename: { renameTarget = note })
             } else {
                 ScrollView {
+                    // Only the open layer's notes (owner, 2026-11-14): a scene's on a scene, a
+                    // chapter's on a chapter, the story's on the story. A single document (a
+                    // screenplay among them) is the story itself.
                     VStack(alignment: .leading, spacing: 18) {
-                        if let sceneURL = margin.sceneURL {
+                        if let document = openDocument {
+                            documentSection(document)
+                        } else if let sceneURL = margin.sceneURL {
                             section(sceneTitle, kind: names.scene, first: true) {
                                 SceneDetails(scene: sceneURL)
                                     .id(sceneURL)
@@ -532,9 +537,8 @@ private struct NotesPane: View {
                                 )
                                 .id(sceneURL)
                             }
-                        }
-                        if let chapterURL = margin.chapterURL {
-                            section(store.chapter(for: chapterURL)?.title ?? names.chapter, kind: names.chapter, first: margin.sceneURL == nil) {
+                        } else if let chapterURL = margin.chapterURL {
+                            section(store.chapter(for: chapterURL)?.title ?? names.chapter, kind: names.chapter, first: true) {
                                 StatusSegments(url: chapterURL)
                                 label("Note")
                                 NoteField(
@@ -544,26 +548,18 @@ private struct NotesPane: View {
                                 )
                                 .id(chapterURL)
                             }
-                        }
-                        if let bookURL = margin.bookURL {
+                        } else if let bookURL = margin.bookURL {
                             // In the Library the story's own page is beside this, its name and
                             // target on it: the section doesn't say them again.
                             section(store.openBook == nil ? nil : store.book(for: bookURL)?.title ?? "Story", kind: "Story",
-                                    first: margin.sceneURL == nil && margin.chapterURL == nil) {
+                                    first: true) {
                                 if store.openBook != nil {
                                     BookTarget(book: bookURL)
                                         .id(bookURL)
                                 }
                                 // A story has many notes, each its own file in its Notes folder
                                 // (a scene or chapter has one, typed in place).
-                                label("Notes")
-                                VStack(alignment: .leading, spacing: 0) {
-                                    ForEach(margin.bookNotes) { note in
-                                        bookNoteRow(note)
-                                    }
-                                    newNoteRow
-                                }
-                                .padding(.horizontal, -8)
+                                storyNotes
                             }
                         }
                     }
@@ -577,6 +573,46 @@ private struct NotesPane: View {
         .onAppear { margin.reloadBookNotes() }
         .sheet(item: $renameTarget) { note in
             RenameSheet(title: note.title) { margin.renameBookNote(note, to: $0) }
+        }
+    }
+
+    /// The open single document (or screenplay), whose layer is the story.
+    private var openDocument: Book? {
+        guard let sceneURL = margin.sceneURL, let book = store.location(ofScene: sceneURL)?.book,
+              book.document?.url == sceneURL else { return nil }
+        return book
+    }
+
+    /// A single document: one section for the story, under its form ("Screenplay"): its
+    /// target, the note typed in place (where Join into One Document gathered the old notes),
+    /// then the story's note files.
+    private func documentSection(_ book: Book) -> some View {
+        let form = store.margin.info(for: book.url).form
+        return section(book.title, kind: form?.title ?? "Story", first: true) {
+            BookTarget(book: book.url)
+                .id(book.url)
+            label("Note")
+            NoteField(
+                placeholder: "Notes on this \((form?.title ?? "story").lowercased())",
+                text: margin.sceneNote,
+                onChange: margin.setSceneNote
+            )
+            .id(book.url)
+            storyNotes
+        }
+    }
+
+    /// The story's notes, each a file in its Notes folder, and New Note.
+    private var storyNotes: some View {
+        Group {
+            label("Notes")
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(margin.bookNotes) { note in
+                    bookNoteRow(note)
+                }
+                newNoteRow
+            }
+            .padding(.horizontal, -8)
         }
     }
 
@@ -865,7 +901,7 @@ private struct BookTarget: View {
                     .focused($editingTarget)
                     .fieldBox(focused: editingTarget)
                     .frame(width: 96)
-                    .help("Word target for the story")
+                    .help(progress.unit == "pages" ? "Page target for the screenplay" : "Word target for the story")
                     .onChange(of: target) { _, value in
                         let digits = value.filter(\.isNumber)
                         if digits != value { target = digits; return }
@@ -873,14 +909,14 @@ private struct BookTarget: View {
                         info.target = Int(digits).flatMap { $0 > 0 ? $0 : nil }
                         margin.setInfo(info, for: book)
                     }
-                Text("words")
+                Text(progress.unit)
                     .font(.system(size: Layout.detailSize, weight: .medium))
                     .foregroundStyle(Color(PaperTheme.secondary))
                 Spacer(minLength: 4)
-                Badge("\(words.formatted()) written")
+                Badge("\(progress.done.formatted()) written")
             }
             if let goal, goal > 0 {
-                ProgressRule(fraction: Double(words) / Double(goal))
+                ProgressRule(fraction: Double(progress.done) / Double(goal))
                     .frame(width: 200)
             }
         }
@@ -888,7 +924,10 @@ private struct BookTarget: View {
         .onAppear { target = goal.map(String.init) ?? "" }
     }
 
-    private var words: Int { store.book(for: book).map(store.wordCount(of:)) ?? 0 }
+    /// Pages for a screenplay, words for anything else.
+    private var progress: (done: Int, unit: String) {
+        store.book(for: book).map(store.targetProgress(of:)) ?? (0, "words")
+    }
 }
 
 /// "83,233 of 90,000 words" and a progress rule, for a book with a target.
@@ -899,10 +938,10 @@ struct BookProgress: View {
 
     var body: some View {
         if let goal = margin.info(for: book.url).target, goal > 0 {
-            let words = store.wordCount(of: book)
+            let progress = store.targetProgress(of: book)
             HStack(spacing: 10) {
-                Badge("\(words.formatted()) of \(goal.formatted()) words")
-                ProgressRule(fraction: Double(words) / Double(goal))
+                Badge("\(progress.done.formatted()) of \(goal.formatted()) \(progress.unit)")
+                ProgressRule(fraction: Double(progress.done) / Double(goal))
                     .frame(width: 160)
             }
         }

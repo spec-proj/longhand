@@ -21,6 +21,10 @@ struct MarkdownEditor: NSViewRepresentable {
     var places: Places
     /// The text, and the `version` this editor last loaded (the store drops stale reports).
     var onChange: (String, Int) -> Void
+    /// A Fountain screenplay (`ScreenplayStyler`, `ScreenplayKeys`) rather than Markdown.
+    var screenplay = false
+    /// Where the status bar's counts (and a screenplay's element) live.
+    var live: LiveCount? = nil
 
     func makeCoordinator() -> Coordinator {
         Coordinator(self)
@@ -71,6 +75,12 @@ struct MarkdownEditor: NSViewRepresentable {
         context.coordinator.attach(textView, scroll: scroll)
         context.coordinator.load(text)
         textView.setSelectedRange(NSRange(location: 0, length: 0))
+        // Laid out first, then to where you were: the place Read was showing (⌘R), else where
+        // you last were in this scene (a new editor, as after Read, starts there too).
+        DispatchQueue.main.async { [weak textView, weak coordinator = context.coordinator] in
+            guard let textView, let coordinator else { return }
+            if let place = coordinator.takeAnchor() ?? places.place(for: scene) { textView.restore(place) }
+        }
 
         return scroll
     }
@@ -141,9 +151,63 @@ struct MarkdownEditor: NSViewRepresentable {
             ProofingFilter.filter(results, in: view.string as NSString)
         }
 
-        /// Return in a list or a quote carries its symbol to the next line.
+        /// Return in a list or a quote carries its symbol to the next line. In a screenplay,
+        /// Return and Tab move between elements (`ScreenplayKeys`).
         func textView(_ textView: NSTextView, doCommandBy selector: Selector) -> Bool {
-            selector == #selector(NSResponder.insertNewline(_:)) && MarkdownFormat.continueBlock(in: textView)
+            if parent.screenplay {
+                if selector == #selector(NSResponder.insertNewline(_:)) {
+                    capsLine = nil
+                    guard let insert = ScreenplayKeys.newline(in: textView) else { return false }
+                    textView.insertText(insert, replacementRange: textView.selectedRange())
+                    return true
+                }
+                if selector == #selector(NSResponder.insertTab(_:)) {
+                    switch ScreenplayKeys.tab(in: textView) {
+                    case .character:
+                        // What is typed on this line is set in capitals: a name.
+                        let string = textView.string as NSString
+                        let at = textView.selectedRange().location
+                        capsLine = at == string.length ? at : string.lineRange(for: NSRange(location: at, length: 0)).location
+                        parent.live?.setElement("Character")
+                    case .parenthetical:
+                        let at = textView.selectedRange().location
+                        textView.insertText("()", replacementRange: textView.selectedRange())
+                        textView.setSelectedRange(NSRange(location: at + 1, length: 0))
+                    case .none:
+                        break
+                    }
+                    // Never a tab character in the script.
+                    return true
+                }
+                return false
+            }
+            return selector == #selector(NSResponder.insertNewline(_:)) && MarkdownFormat.continueBlock(in: textView)
+        }
+
+        /// A line Tab began as a character's name: what's typed on it is set in capitals.
+        private var capsLine: Int?
+
+        /// In a screenplay a scene heading, and a name begun with Tab, are typed in capitals.
+        func textView(_ textView: NSTextView, shouldChangeTextIn range: NSRange, replacementString: String?) -> Bool {
+            guard parent.screenplay, let typed = replacementString, !typed.isEmpty,
+                  typed.contains(where: \.isLowercase), !typed.contains("\n"), !textView.hasMarkedText() else { return true }
+            let string = textView.string as NSString
+            let lineStart = range.location >= string.length && (string.length == 0 || string.character(at: string.length - 1) == 0x0A)
+                ? range.location
+                : string.lineRange(for: NSRange(location: min(range.location, max(string.length - 1, 0)), length: 0)).location
+            guard range.location >= lineStart else { return true }
+            let before = string.substring(with: NSRange(location: lineStart, length: range.location - lineStart))
+            if capsLine == lineStart {
+                textView.insertText(typed.uppercased(), replacementRange: range)
+                return false
+            }
+            if ScreenplayKeys.isHeading(before + typed) {
+                // The whole heading so far, in capitals ("int. " becomes "INT. ").
+                let whole = NSRange(location: lineStart, length: NSMaxRange(range) - lineStart)
+                textView.insertText((before + typed).uppercased(), replacementRange: whole)
+                return false
+            }
+            return true
         }
 
         // MARK: Setup
@@ -161,7 +225,25 @@ struct MarkdownEditor: NSViewRepresentable {
             modes = WritingModes(textView: textView, scroll: scroll)
         }
 
+        /// The read-or-write anchor as a place in this scene, if it is for this scene; taken.
+        func takeAnchor() -> Places.Place? {
+            guard let anchor = parent.margin.readingAnchor, let textView else { return nil }
+            let length = (textView.string as NSString).length
+            let top = anchor.top.flatMap { $0.scene == parent.scene ? $0.location : nil }
+            let caret = anchor.caret.flatMap { $0.scene == parent.scene ? $0.location : nil }
+            guard let at = top ?? caret else { return nil }
+            parent.margin.readingAnchor = nil
+            // From Read the top is an element's start: the caret goes there too.
+            return Places.Place(caret: min(caret ?? at, length), top: min(at, length))
+        }
+
         func detach() {
+            // A screenplay leaving for Read: it opens at the same part of the script.
+            if parent.screenplay, let textView, let scene = loadedScene {
+                let place = textView.currentPlace
+                parent.margin.readingAnchor = MarginStore.ReadingAnchor(top: (scene, place.top), caret: (scene, place.caret))
+                reportPlace()
+            }
             overlay?.detach()
             modes?.detach()
             gutter?.detach()
@@ -187,12 +269,16 @@ struct MarkdownEditor: NSViewRepresentable {
             loadedScene = parent.scene
             pendingEdit = nil
             loading = true
+            capsLine = nil
             textView.string = text
             loading = false
+            // "--" stays two hyphens in a script; smart quotes are fine.
+            textView.isAutomaticDashSubstitutionEnabled = !parent.screenplay
             if let storage = textView.textStorage {
-                MarkdownStyler.apply(to: storage)
+                if parent.screenplay { ScreenplayStyler.apply(to: storage) } else { MarkdownStyler.apply(to: storage) }
             }
-            textView.typingAttributes = MarkdownStyler.baseAttributes
+            textView.typingAttributes = parent.screenplay ? ScreenplayStyler.baseAttributes : MarkdownStyler.baseAttributes
+            reportElement()
             parent.margin.anchor(scene: parent.scene, text: text)
             overlay?.invalidate()
             modes?.update(loaded: true)
@@ -265,6 +351,46 @@ struct MarkdownEditor: NSViewRepresentable {
             guard let textView, !loading else { return }
             parent.margin.caretMoved(scene: parent.scene, location: textView.selectedRange().location)
             modes?.update()
+            if let line = capsLine {
+                let string = textView.string as NSString
+                let at = textView.selectedRange().location
+                let start = at >= string.length && (string.length == 0 || string.character(at: string.length - 1) == 0x0A)
+                    ? at : string.lineRange(for: NSRange(location: min(at, max(string.length - 1, 0)), length: 0)).location
+                if start != line { capsLine = nil }
+            }
+            reportElement()
+        }
+
+        /// The element the caret is in, for the status bar (screenplays only).
+        private func reportElement() {
+            guard let live = parent.live else { return }
+            guard parent.screenplay, let textView else {
+                live.setElement(nil)
+                return
+            }
+            if capsLine != nil {
+                live.setElement("Character")
+                return
+            }
+            let kind = ScreenplayStyler.element(at: textView.selectedRange().location, in: textView.string as NSString)
+            live.setElement(Self.name(of: kind))
+        }
+
+        static func name(of kind: Fountain.Kind) -> String {
+            switch kind {
+            case .blank, .action: return "Action"
+            case .titleKey, .titleValue: return "Title Page"
+            case .sceneHeading: return "Scene Heading"
+            case .character: return "Character"
+            case .parenthetical: return "Parenthetical"
+            case .dialogue: return "Dialogue"
+            case .transition: return "Transition"
+            case .centered: return "Centred"
+            case .lyric: return "Lyric"
+            case .pageBreak: return "Page Break"
+            case .section: return "Section"
+            case .synopsis: return "Synopsis"
+            }
         }
 
         private func restyle(_ textView: NSTextView) {
@@ -272,17 +398,22 @@ struct MarkdownEditor: NSViewRepresentable {
             let selection = textView.selectedRange()
             let edited = pendingEdit ?? NSRange(location: 0, length: storage.length)
             pendingEdit = nil
-            MarkdownStyler.restyle(storage, around: NSRange(
+            let around = NSRange(
                 location: min(edited.location, storage.length),
                 length: max(0, min(NSMaxRange(edited), storage.length) - min(edited.location, storage.length))
-            ))
+            )
+            if parent.screenplay {
+                ScreenplayStyler.restyle(storage, around: around)
+            } else {
+                MarkdownStyler.restyle(storage, around: around)
+            }
             if selection.location <= storage.length {
                 textView.setSelectedRange(NSRange(
                     location: selection.location,
                     length: min(selection.length, storage.length - selection.location)
                 ))
             }
-            textView.typingAttributes = MarkdownStyler.baseAttributes
+            textView.typingAttributes = parent.screenplay ? ScreenplayStyler.baseAttributes : MarkdownStyler.baseAttributes
         }
     }
 }

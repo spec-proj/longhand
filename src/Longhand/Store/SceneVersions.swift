@@ -188,12 +188,12 @@ extension Git {
             let bookURL = root.appendingPathComponent(book)
             for chapter in (try? fm.contentsOfDirectory(atPath: bookURL.path)) ?? [] where !chapter.hasPrefix(".") && chapter != "Notes" {
                 // Scenes only, or one document: Markdown files straight in the story's folder.
-                if chapter.lowercased().hasSuffix(".md") {
+                if ProseFile.isProse(chapter) {
                     paths.append("\(book)/\(chapter)")
                     continue
                 }
                 let chapterURL = bookURL.appendingPathComponent(chapter)
-                for scene in (try? fm.contentsOfDirectory(atPath: chapterURL.path)) ?? [] where scene.lowercased().hasSuffix(".md") {
+                for scene in (try? fm.contentsOfDirectory(atPath: chapterURL.path)) ?? [] where ProseFile.isProse(scene) {
                     paths.append("\(book)/\(chapter)/\(scene)")
                 }
             }

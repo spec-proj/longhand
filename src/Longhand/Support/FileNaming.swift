@@ -105,3 +105,32 @@ enum FileNaming {
         }
     }
 }
+
+/// The kinds of file a story's text is kept in: Markdown, and Fountain for screenplays
+/// (owner, 2026-11-14). Both are plain text any editor opens.
+enum ProseFile {
+    static let markdown = "md"
+    static let fountain = "fountain"
+
+    /// Whether a file name (or path) is a scene's text.
+    static func isProse(_ name: String) -> Bool {
+        let lower = name.lowercased()
+        return lower.hasSuffix(".md") || lower.hasSuffix(".fountain")
+    }
+
+    static func isProse(_ url: URL) -> Bool {
+        let ext = url.pathExtension.lowercased()
+        return ext == markdown || ext == fountain
+    }
+
+    /// The name without its `.md` or `.fountain`.
+    static func base(_ name: String) -> String {
+        let lower = name.lowercased()
+        if lower.hasSuffix(".md") { return String(name.dropLast(3)) }
+        if lower.hasSuffix(".fountain") { return String(name.dropLast(9)) }
+        return name
+    }
+
+    /// Git pathspecs for every scene file.
+    static let pathspecs = ["*.md", "*.fountain"]
+}

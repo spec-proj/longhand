@@ -271,6 +271,17 @@ final class VersionStore: ObservableObject {
         }
     }
 
+    /// The last numbered draft tagged ("Draft 2") and when it was tagged, for a screenplay's
+    /// title page; nil if none. One Git call.
+    var latestDraft: (name: String, date: Date)? {
+        guard let root else { return nil }
+        let output = Git.run(["for-each-ref", "--sort=-v:refname", "--count=1",
+                              "--format=%(refname:short)%09%(creatordate:unix)", "refs/tags/draft-*"], in: root).output
+        let parts = output.split(separator: "\t")
+        guard parts.count == 2, let number = Int(parts[0].dropFirst(6)), let seconds = TimeInterval(parts[1]) else { return nil }
+        return ("Draft \(number)", Date(timeIntervalSince1970: seconds))
+    }
+
     /// The name offered for the next draft: "Draft 1", "Draft 2"…
     var nextDraftName: String {
         let numbers = recent.flatMap(\.drafts).compactMap { name -> Int? in
@@ -735,6 +746,7 @@ enum Git {
     static let attributes = """
     # Written by Longhand. Scenes are Markdown: Git shows changes under the nearest heading.
     *.md     text eol=lf diff=markdown
+    *.fountain text eol=lf
     *.json   text eol=lf
     *.docx   binary
     *.pdf    binary

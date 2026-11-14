@@ -534,7 +534,7 @@ struct SidebarView: View {
             // Back to every story: a labelled row the width of the column, in line with the
             // page's and the margin's header rows.
             Button {
-                store.openBook = nil
+                store.showLibrary()
             } label: {
                 HStack(spacing: 6) {
                     Symbol.back.view(size: 11, weight: .semibold)
@@ -586,10 +586,12 @@ struct SidebarView: View {
                             }
                         }
                         if let target, target > 0 {
-                            ProgressRule(fraction: Double(words) / Double(target))
+                            // Pages for a screenplay, words for anything else.
+                            let progress = store.targetProgress(of: book)
+                            ProgressRule(fraction: Double(progress.done) / Double(target))
                                 .frame(height: 2)
                                 .padding(.top, 4)
-                                .help("\(words.formatted()) of \(target.formatted()) words")
+                                .help("\(progress.done.formatted()) of \(target.formatted()) \(progress.unit)")
                         }
                     }
                     Spacer(minLength: 0)
@@ -648,6 +650,7 @@ struct SidebarView: View {
             title: book.title,
             look: looks[book.url] ?? Look(),
             words: store.wordCount(of: book),
+            pages: book.document.flatMap { $0.isScreenplay ? store.pages(of: $0) : nil },
             selected: store.selection == .book(book.url),
             cover: cover(of: book),
             enter: { store.openBook = book.url }
@@ -677,7 +680,7 @@ struct SidebarView: View {
             }
         }
         Button("Rename…") { renameTarget = item(for: book) }
-        if book.shape == .document || book.shape == .scenes {
+        if (book.shape == .document || book.shape == .scenes) && !book.isScreenplay {
             Button("Split into \(store.names(of: book.url).chapters)") { store.splitIntoChapters(book.url) }
         }
         if book.shape != .document {
@@ -748,14 +751,24 @@ struct SidebarView: View {
             goTo(heading, in: document)
         } label: {
             HStack(spacing: 0) {
+                if let number = heading.number {
+                    Text(number)
+                        .font(.system(size: Layout.listSize).monospacedDigit())
+                        .foregroundStyle(Color(PaperTheme.tertiary))
+                        .lineLimit(1)
+                        .fixedSize()
+                        // Room for "16A" and the like; longer numbers widen it.
+                        .frame(minWidth: 30, alignment: .trailing)
+                        .padding(.trailing, 7)
+                }
                 Text(heading.title)
-                    .font(.system(size: Layout.listSize, weight: heading.level == 1 ? .medium : .regular))
+                    .font(.system(size: Layout.listSize, weight: heading.level == 1 && heading.number == nil ? .medium : .regular))
                     .foregroundStyle(Color(heading.level <= 2 ? PaperTheme.ink : PaperTheme.secondary))
                     .lineLimit(1)
                     .truncationMode(.tail)
                 Spacer(minLength: 0)
             }
-            .padding(.leading, rowLeading + triangle + CGFloat(max(0, heading.level - outlineTop)) * step)
+            .padding(.leading, heading.number != nil ? rowLeading : rowLeading + triangle + CGFloat(max(0, heading.level - outlineTop)) * step)
             .padding(.trailing, Layout.pad)
             .frame(height: 24)
             .contentShape(Rectangle())
@@ -774,16 +787,24 @@ struct SidebarView: View {
             if !outline.isEmpty { outline = [] }
             return
         }
-        let next = OutlineHeading.all(in: store.fileText(at: document.url))
+        let text = store.fileText(at: document.url)
+        let next = document.isScreenplay ? OutlineHeading.screenplay(in: text) : OutlineHeading.all(in: text)
         if next != outline { outline = next }
     }
 
     private func goTo(_ heading: OutlineHeading, in document: URL) {
         if store.selection != .scene(document) { store.selection = .scene(document) }
+        let screenplay = document.pathExtension.lowercased() == ProseFile.fountain
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+            // A screenplay being read: its page.
+            if screenplay, UserDefaults.standard.bool(forKey: ScreenplayReader.readingKey) {
+                NotificationCenter.default.post(name: ScreenplayReader.goToScene, object: heading.id)
+                return
+            }
             // The page's own text, which may be newer than the file: the same heading by order.
+            let ranges = { (text: String) in screenplay ? Fountain.headings(in: text).map(\.range) : OutlineHeading.ranges(in: text) }
             guard let page = store.margin.textView,
-                  let range = OutlineHeading.ranges(in: page.string).dropFirst(heading.id).first else { return }
+                  let range = ranges(page.string).dropFirst(heading.id).first else { return }
             page.window?.makeFirstResponder(page)
             page.setSelectedRange(NSRange(location: NSMaxRange(range), length: 0))
             page.scrollRangeToVisible(range)
@@ -910,7 +931,7 @@ struct SidebarView: View {
                             renameFolder = folder
                         }
                     }]
-                    : shapeItems + [ToolbarMenuItem(title: "Back to Library", separatorAfter: true) { store.openBook = nil }])
+                    : shapeItems + [ToolbarMenuItem(title: "Back to Library", separatorAfter: true) { store.showLibrary() }])
                     + [
                         ToolbarMenuItem(title: "Show Library in Finder", separatorAfter: true) {
                             store.revealLibrary()
@@ -929,7 +950,7 @@ struct SidebarView: View {
     private var shapeItems: [ToolbarMenuItem] {
         guard let book = store.library.flatMap({ openBook(in: $0) }) else { return [] }
         var items: [ToolbarMenuItem] = []
-        if book.shape == .document || book.shape == .scenes {
+        if (book.shape == .document || book.shape == .scenes) && !book.isScreenplay {
             items.append(ToolbarMenuItem(title: "Split into \(store.names(of: book.url).chapters)") { store.splitIntoChapters(book.url) })
         }
         if book.shape != .document {
@@ -1168,6 +1189,8 @@ private struct LibraryRow: View, Equatable {
     let title: String
     let look: SidebarView.Look
     let words: Int
+    /// A screenplay's length, shown instead of its words.
+    var pages: Int? = nil
     let selected: Bool
     /// The book's cover, if it has one.
     let cover: NSImage?
@@ -1179,7 +1202,7 @@ private struct LibraryRow: View, Equatable {
     }
 
     static func == (a: LibraryRow, b: LibraryRow) -> Bool {
-        a.title == b.title && a.look == b.look && a.words == b.words && a.selected == b.selected && a.cover === b.cover
+        a.title == b.title && a.look == b.look && a.words == b.words && a.pages == b.pages && a.selected == b.selected && a.cover === b.cover
     }
 
     /// The Library's own row, larger than the rows inside a book: the cover (or its initial),
@@ -1206,7 +1229,7 @@ private struct LibraryRow: View, Equatable {
                         }
                     }
                 }
-                Text(words == 1 ? "1 word" : "\(words.formatted()) words")
+                Text(pages.map { $0 == 1 ? "1 page" : "\($0.formatted()) pages" } ?? (words == 1 ? "1 word" : "\(words.formatted()) words"))
                     .font(.system(size: Layout.detailSize, weight: .medium).monospacedDigit())
                     .foregroundStyle(Color(PaperTheme.secondary))
                     .help(Estimate.words(words))
@@ -1235,6 +1258,15 @@ struct OutlineHeading: Identifiable, Equatable {
     let id: Int
     let level: Int
     let title: String
+    /// A screenplay's scene number.
+    var number: String? = nil
+
+    /// A screenplay's scene headings, numbered.
+    static func screenplay(in text: String) -> [OutlineHeading] {
+        Fountain.headings(in: text).enumerated().map { index, heading in
+            OutlineHeading(id: index, level: 1, title: heading.title, number: heading.number)
+        }
+    }
 
     static func all(in text: String) -> [OutlineHeading] {
         let ns = text as NSString

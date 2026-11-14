@@ -8,7 +8,7 @@ struct SettingsView: View {
     @AppStorage(AppTheme.modeKey) private var mode = "system"
     @AppStorage(ProseFace.defaultsKey) private var proseFace = ProseFace.sfPro.rawValue
     @AppStorage(ProseSize.defaultsKey) private var proseSize = 0
-    @AppStorage(MenuBarMenu.key) private var showMenuBarItem = true
+    @AppStorage(MenuBarItem.key) private var showMenuBarItem = true
     @AppStorage(WritingModes.focusKey) private var focus = false
     @AppStorage(WritingModes.unitKey) private var focusUnit = WritingModes.Unit.sentence.rawValue
     @AppStorage(WritingModes.typewriterKey) private var typewriter = false

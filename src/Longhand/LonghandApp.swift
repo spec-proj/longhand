@@ -15,11 +15,11 @@ struct LonghandApp: App {
     @AppStorage(StatusBar.countKey) private var showCount = true
     @AppStorage("showCards") private var showCards = false
     @AppStorage(ChapterDocumentView.readingKey) private var chapterReading = true
+    @AppStorage(ScreenplayReader.readingKey) private var screenplayReading = false
     @AppStorage(StoryPage.key) private var storyPage = false
     @AppStorage(WritingModes.focusKey) private var focus = false
     @AppStorage(WritingModes.unitKey) private var focusUnit = WritingModes.Unit.sentence.rawValue
     @AppStorage(WritingModes.typewriterKey) private var typewriter = false
-    @AppStorage(MenuBarMenu.key) private var showMenuBarItem = true
 
     init() {
         // Plain 8-bit layers, as before Big Sur. With AppKit's "automatic" layer stores the page
@@ -34,6 +34,7 @@ struct LonghandApp: App {
         // Fonts first: the store measures the prose face as it opens the library.
         Snapshot.prepareBackgroundRun()
         AppTheme.reload()
+        ScreenplayFont.register()
         let store = LibraryStore()
         _store = StateObject(wrappedValue: store)
         LonghandAppDelegate.store = store
@@ -42,6 +43,12 @@ struct LonghandApp: App {
     /// A story is open from inside it (Contents and Page apply).
     private var showingStory: Bool {
         if case .book = store.selection, store.openBook != nil { return true }
+        return false
+    }
+
+    /// A screenplay is what's open (Read shows its pages).
+    private var showingScreenplay: Bool {
+        if case .scene(let url) = store.selection { return url.pathExtension.lowercased() == ProseFile.fountain }
         return false
     }
 
@@ -78,6 +85,8 @@ struct LonghandApp: App {
                     .disabled(store.library == nil || store.openBook != nil)
                 Button("New Folder") { store.createFolder() }
                     .disabled(store.library == nil || store.openBook != nil)
+                Button("Import Final Draft…") { store.importFinalDraft() }
+                    .disabled(store.library == nil)
                 Divider()
                 Button("Open Library…") { store.chooseLibrary() }
                     .keyboardShortcut("o", modifiers: .command)
@@ -109,7 +118,7 @@ struct LonghandApp: App {
             }
             CommandMenu("Go") {
                 // Out of the story to every story, as the contents' ‹ Library row does.
-                Button("Library") { store.openBook = nil }
+                Button("Library") { store.showLibrary() }
                     .keyboardShortcut("4", modifiers: .command)
                     .disabled(store.library == nil || store.openBook == nil)
                 Button("Switch Scene…") { store.switcherShown = true }
@@ -163,12 +172,19 @@ struct LonghandApp: App {
                 // A chapter set like the book, or the same chapter for editing; a story's
                 // contents, or the whole story to read.
                 Button(showingStory ? (storyPage ? "Show Contents" : "Read Story")
+                       : showingScreenplay ? (screenplayReading ? "Write Screenplay" : "Read Screenplay")
                        : (chapterReading ? "Write in Chapter" : "Read Chapter")) {
                     showCards = false
-                    if showingStory { storyPage.toggle() } else { chapterReading.toggle() }
+                    if showingStory {
+                        storyPage.toggle()
+                    } else if showingScreenplay {
+                        screenplayReading.toggle()
+                    } else {
+                        chapterReading.toggle()
+                    }
                 }
                 .keyboardShortcut("r", modifiers: .command)
-                .disabled(!showingChapter && !showingStory)
+                .disabled(!showingChapter && !showingStory && !showingScreenplay)
                 Divider()
                 Toggle("Focus", isOn: $focus)
                     .keyboardShortcut("d", modifiers: .command)
@@ -220,15 +236,6 @@ struct LonghandApp: App {
 
         Settings {
             SettingsView(versions: store.versions)
-        }
-        // In the Mac's menu bar; never for hidden runs (a test would put one in the owner's).
-        // Switched off, SwiftUI keeps a 0-point placeholder off the bar, which shows nothing.
-        MenuBarExtra("Longhand", systemImage: Symbol.menuBar.rawValue, isInserted: Binding(
-            get: { showMenuBarItem && !Snapshot.isBackgroundRun },
-            // (Removing it from the bar turns the setting off; a hidden run never writes it.)
-            set: { if !Snapshot.isBackgroundRun { showMenuBarItem = $0 } }
-        )) {
-            MenuBarMenu(store: store, sync: store.versions.sync, changes: store.versions.changes)
         }
     }
 }

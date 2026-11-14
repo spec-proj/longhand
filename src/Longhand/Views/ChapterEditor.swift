@@ -90,7 +90,10 @@ struct ChapterEditor: NSViewRepresentable {
         // Laid out first, so the place can be scrolled to.
         DispatchQueue.main.async { [weak textView] in
             guard let textView else { return }
-            if let place = places.place(for: chapter) {
+            // Come from Read (⌘R): the same place; else where you last were in this chapter.
+            if let place = context.coordinator.takeAnchor() {
+                textView.restore(place)
+            } else if let place = places.place(for: chapter) {
                 textView.restore(place)
             } else {
                 textView.setSelectedRange(NSRange(location: context.coordinator.bodyStart, length: 0))
@@ -190,7 +193,33 @@ struct ChapterEditor: NSViewRepresentable {
             textView.copyText = { [weak self] in self?.copied($0) }
         }
 
+        /// The read-or-write anchor (`MarginStore.ReadingAnchor`) as a place on this page, if
+        /// it is in one of its scenes; taken, so it is used once.
+        func takeAnchor() -> Places.Place? {
+            guard let anchor = margin.readingAnchor else { return nil }
+            func page(_ point: (scene: URL, location: Int)?) -> Int? {
+                guard let point, let segment = segments.first(where: { $0.url == point.scene }) else { return nil }
+                return segment.range.location + min(max(0, point.location), segment.range.length)
+            }
+            guard let top = page(anchor.top) ?? page(anchor.caret) else { return nil }
+            margin.readingAnchor = nil
+            return Places.Place(caret: page(anchor.caret) ?? top, top: top)
+        }
+
+        /// Where you are on this page, in its scenes' own text.
+        private func anchor() -> MarginStore.ReadingAnchor? {
+            guard let textView else { return nil }
+            func scene(_ location: Int) -> (scene: URL, location: Int)? {
+                guard let index = segmentIndex(containing: NSRange(location: location, length: 0)) else { return nil }
+                return (segments[index].url, location - segments[index].range.location)
+            }
+            let place = textView.currentPlace
+            return MarginStore.ReadingAnchor(top: scene(place.top), caret: scene(place.caret))
+        }
+
         func detach() {
+            // Leaving for Read (or anywhere): Read opens where this page was.
+            if let anchor = anchor() { margin.readingAnchor = anchor }
             overlay?.detach()
             modes?.detach()
             gutter?.detach()

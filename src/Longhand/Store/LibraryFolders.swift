@@ -62,7 +62,7 @@ enum LibraryFolders {
     }
 
     private static func holdsScene(_ folder: URL) -> Bool {
-        visible(folder).contains { $0.lowercased().hasSuffix(".md") }
+        visible(folder).contains { ProseFile.isProse($0) }
     }
 
     private static func visible(_ folder: URL) -> [String] {

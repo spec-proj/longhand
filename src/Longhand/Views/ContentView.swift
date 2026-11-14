@@ -2,6 +2,7 @@ import SwiftUI
 import AppKit
 
 struct ContentView: View {
+    @Environment(\.openWindow) private var openWindow
     @EnvironmentObject private var store: LibraryStore
     /// Not observed: the window only needs it for the toolbar's actions, and observing it
     /// redrew the whole window whenever a comment was focused.
@@ -13,6 +14,7 @@ struct ContentView: View {
     @AppStorage(ProseSize.defaultsKey) private var proseSize = 0
     @AppStorage("showCards") private var showCards = false
     @AppStorage(ChapterDocumentView.readingKey) private var chapterReading = true
+    @AppStorage(ScreenplayReader.readingKey) private var screenplayReading = false
     @AppStorage(StoryPage.key) private var storyPage = false
     @State private var renameTarget: ManuscriptItem?
     /// The contents column's width, panel and gap included: drag its right edge (remembered).
@@ -134,7 +136,10 @@ struct ContentView: View {
             Text("“\(store.pendingLibraryURL?.lastPathComponent ?? "")” isn’t a Longhand library. Every folder inside it will appear as a story. Longhand won’t move your files.")
         }
         .sheet(isPresented: $store.exportRequested) {
-            if let book = Exporter.book(in: store) {
+            if let book = Exporter.book(in: store), book.isScreenplay {
+                ScreenplayExportSheet(book: book)
+                    .environmentObject(store)
+            } else if let book = Exporter.book(in: store) {
                 ExportSheet(book: book)
                     .environmentObject(store)
             }
@@ -153,6 +158,8 @@ struct ContentView: View {
             }
         }
         .onAppear {
+            // The menu bar item can open a window again after every one was closed.
+            MenuBarItem.shared.openWindow = { [openWindow] in openWindow(id: "main") }
             AppTheme.applyAppearance()
             Snapshot.applyAppearance()
             Snapshot.prepareMargin(margin)
@@ -172,6 +179,10 @@ struct ContentView: View {
             } else if Snapshot.wantsBook,
                       let book = store.library?.books.first {
                 store.selection = .book(book.url)
+            } else if Snapshot.wantsScreenplay,
+                      let book = store.library?.books.first(where: \.isScreenplay), let script = book.document {
+                store.openBook = book.url
+                store.selection = .scene(script.url)
             }
             SelfTest.runIfRequested(store: store)
             PerfTest.runIfRequested(store: store)
@@ -188,6 +199,7 @@ struct ContentView: View {
         let switchShown: Bool
         switch store.selection {
         case .chapter: switchShown = true
+        case .scene(let url): switchShown = url.pathExtension.lowercased() == ProseFile.fountain
         case .book: switchShown = store.openBook != nil
         default: switchShown = false
         }
@@ -229,7 +241,7 @@ struct ContentView: View {
         // The repository's name when the library has a remote ("writing"), else its folder's.
         let name = store.versions.remoteAddress.map(Git.repositoryName(of:)) ?? library.name
         let home = PathSegment(id: 0, title: name, isCurrent: false,
-                               action: { store.openBook = nil }, help: "Show every story in \(name)")
+                               action: { store.showLibrary() }, help: "Show every story in \(name)")
         let rest = placeSegments(in: library)
         return rest.first?.id == 0 ? rest : [home] + rest
     }
@@ -360,6 +372,9 @@ struct ContentView: View {
                 switch store.selection {
                 case .chapter:
                     ViewSwitch(showCards: $showCards, first: ("Read", "Write"), isFirst: $chapterReading)
+                case .scene(let url) where url.pathExtension.lowercased() == ProseFile.fountain:
+                    // A screenplay: its pages, or the script to write. No cards.
+                    ViewSwitch(showCards: .constant(false), first: ("Read", "Write"), isFirst: $screenplayReading, cards: false)
                 case .book where store.openBook != nil:
                     ViewSwitch(showCards: $showCards, first: ("Contents", "Page"), isFirst: Binding(
                         get: { !storyPage }, set: { storyPage = !$0 }))
@@ -490,19 +505,23 @@ struct ViewSwitch: View {
     /// The two pages before Cards, and whether the first is the one shown.
     let first: (String, String)
     @Binding var isFirst: Bool
+    /// Whether Cards is offered (not for a screenplay).
+    var cards = true
 
     var body: some View {
         HStack(spacing: 0) {
             segment(first.0, on: !showCards && isFirst) { showCards = false; isFirst = true }
             Rectangle().fill(Color(PaperTheme.controlBorder)).frame(width: 1)
             segment(first.1, on: !showCards && !isFirst) { showCards = false; isFirst = false }
-            Rectangle().fill(Color(PaperTheme.controlBorder)).frame(width: 1)
-            segment("Cards", on: showCards) { showCards = true }
+            if cards {
+                Rectangle().fill(Color(PaperTheme.controlBorder)).frame(width: 1)
+                segment("Cards", on: showCards) { showCards = true }
+            }
         }
         .frame(height: Layout.controlHeight)
         .background(Color(PaperTheme.controlFill))
         .roundedFrame(Color(PaperTheme.controlBorder), lineWidth: 1)
-        .help("\(first.0), \(first.1) or Cards")
+        .help(cards ? "\(first.0), \(first.1) or Cards" : "\(first.0) or \(first.1)")
     }
 
     private func segment(_ title: String, on: Bool, action: @escaping () -> Void) -> some View {

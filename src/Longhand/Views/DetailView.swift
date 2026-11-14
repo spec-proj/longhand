@@ -5,6 +5,7 @@ struct DetailView: View {
     /// Chapters and books show as cards rather than pages.
     @AppStorage("showCards") private var showCards = false
     @AppStorage(StoryPage.key) private var storyPage = false
+    @AppStorage(ScreenplayReader.readingKey) private var screenplayReading = false
 
     var body: some View {
         Group {
@@ -12,6 +13,8 @@ struct DetailView: View {
             case .scene(let url):
                 if let scene = store.scene(for: url), let version = store.historyPreview {
                     HistoryPreview(scene: scene, version: version)
+                } else if let scene = store.scene(for: url), scene.isScreenplay, screenplayReading {
+                    ScreenplayReader(scene: scene)
                 } else if let scene = store.scene(for: url) {
                     SceneEditorView(scene: scene)
                 } else {
@@ -55,12 +58,13 @@ struct DetailView: View {
 
 /// Centres the writing column in whatever width the pane has.
 private struct Column<Content: View>: View {
+    var width: CGFloat = Layout.column
     @ViewBuilder let content: Content
 
     var body: some View {
         HStack(spacing: 0) {
             Spacer(minLength: 0)
-            content.frame(maxWidth: Layout.column)
+            content.frame(maxWidth: width)
             Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -82,7 +86,8 @@ struct SceneEditorView: View {
                 SceneHeader(scene: scene, book: location.book)
                     .deskFade(store.deskCleared)
             }
-            Column {
+            // A screenplay's column is its page's sixty characters of Courier Prime.
+            Column(width: scene.isScreenplay ? ScreenplayStyler.column : Layout.column) {
                 MarkdownEditor(
                     text: store.text,
                     version: store.textVersion,
@@ -90,7 +95,9 @@ struct SceneEditorView: View {
                     margin: margin,
                     changes: store.versions.changes,
                     places: store.places,
-                    onChange: { store.updateText($0, fromEditor: true, version: $1) }
+                    onChange: { store.updateText($0, fromEditor: true, version: $1) },
+                    screenplay: scene.isScreenplay,
+                    live: store.live
                 )
                 // One editor for every scene: switching swaps its text (and clears its undo)
                 // rather than building a new text view and laying out the window again.
@@ -628,7 +635,9 @@ struct StatusBar: View {
     private var count: some View {
         switch store.selection {
         case .scene(let url):
-            if let scene = store.scene(for: url) {
+            if let scene = store.scene(for: url), scene.isScreenplay {
+                ScreenplayCount(title: scene.title, pages: store.pages(of: scene), live: store.live)
+            } else if let scene = store.scene(for: url) {
                 SceneCount(title: scene.title, live: store.live)
             }
         case .chapter(let url):
@@ -649,11 +658,11 @@ struct StatusBar: View {
 
     /// "175", or "175 of 80,000" when the book has a target.
     private func bookWords(_ book: Book) -> String {
-        let words = store.wordCount(of: book).formatted()
+        let progress = store.targetProgress(of: book)
         if let goal = targets[book.url], goal > 0 {
-            return "\(words) of \(goal.formatted()) words"
+            return "\(progress.done.formatted()) of \(goal.formatted()) \(progress.unit)"
         }
-        return "\(words) words"
+        return "\(progress.done.formatted()) \(progress.unit)"
     }
 }
 
@@ -770,6 +779,37 @@ private struct GitStatus: View {
 }
 
 /// The open scene's count, watching only the live counts, so a keystroke redraws this alone.
+/// A screenplay's line: its title, its pages, and the element the caret is in (Tab and
+/// Return move between elements; the tooltip says how).
+private struct ScreenplayCount: View {
+    let title: String
+    let pages: Int
+    @ObservedObject var live: LiveCount
+
+    var body: some View {
+        HStack(spacing: 7) {
+            Text(title).lineLimit(1).truncationMode(.middle)
+            Text(pages == 1 ? "1 page" : "\(pages.formatted()) pages")
+                .lineLimit(1).fixedSize().boxed(height: 18, padding: 7)
+                .help("About a minute a page · \(Estimate.words(live.words))")
+            if let element = live.element {
+                Text(element)
+                    .lineLimit(1).fixedSize().boxed(height: 18, padding: 7)
+                    .help(hint(element))
+            }
+        }
+    }
+
+    private func hint(_ element: String) -> String {
+        switch element {
+        case "Character": return "Return: dialogue · Tab on a line under it: parenthetical"
+        case "Dialogue": return "Return: action · Tab on an empty line under it: parenthetical"
+        case "Parenthetical": return "Return: dialogue"
+        default: return "Tab on an empty line: character · Return: a new paragraph"
+        }
+    }
+}
+
 private struct SceneCount: View {
     let title: String
     @ObservedObject var live: LiveCount

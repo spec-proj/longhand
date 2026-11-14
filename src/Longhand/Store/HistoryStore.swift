@@ -42,7 +42,7 @@ final class HistoryStore {
         let base = root.path + "/"
         guard scene.path.hasPrefix(base) else { return nil }
         var key = String(scene.path.dropFirst(base.count))
-        if key.lowercased().hasSuffix(".md") { key.removeLast(3) }
+        key = ProseFile.base(key)
         return root.appendingPathComponent(".longhand/history/\(key)", isDirectory: true)
     }
 

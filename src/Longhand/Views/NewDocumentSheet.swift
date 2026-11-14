@@ -13,13 +13,13 @@ struct NewDocumentSheet: View {
     @State private var scenes = true
     @State private var name = ""
 
-    static let forms: [BookForm] = [.novel, .novella, .shortStory, .essay, .notebook]
+    static let forms: [BookForm] = [.novel, .novella, .shortStory, .essay, .screenplay, .notebook]
 
     /// The division each form starts with.
     static func suggestedShape(for form: BookForm) -> BookShape {
         switch form {
         case .novel, .novella: return .chaptersAndScenes
-        case .shortStory, .essay, .notebook: return .document
+        case .shortStory, .essay, .screenplay, .notebook: return .document
         }
     }
 
@@ -42,6 +42,9 @@ struct NewDocumentSheet: View {
                     Toggle(PartNames.of(form).chapters, isOn: $chapters)
                     Toggle(PartNames.of(form).scenes, isOn: $scenes)
                 }
+                // A screenplay is one file; its scenes are the headings typed in it.
+                .disabled(form == .screenplay)
+                .help(form == .screenplay ? "A screenplay is one document. Its scenes come from the scene headings you type." : "")
                 .toggleStyle(.checkbox)
                 .font(.system(size: Layout.chromeSize))
             }
@@ -62,7 +65,7 @@ struct NewDocumentSheet: View {
             }
         }
         .padding(22)
-        .frame(width: 640)
+        .frame(width: 790)
         .background(Color(PaperTheme.paper))
     }
 
@@ -94,11 +97,11 @@ private struct FormCover: View {
                     Spacer(minLength: 0)
                 }
                 Text(title)
-                    .font(.system(size: 15, weight: .regular, design: .serif))
+                    .font(.system(size: 14, weight: .regular, design: .serif))
                     .foregroundStyle(Color(PaperTheme.ink))
                     .multilineTextAlignment(.center)
-                    .padding(.leading, 14)
-                    .padding(.trailing, 8)
+                    .padding(.leading, 12)
+                    .padding(.trailing, 5)
             }
             .frame(width: 98, height: 157)
             .clipShape(rounded(Layout.radius))

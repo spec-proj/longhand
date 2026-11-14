@@ -30,6 +30,7 @@ import SwiftUI
 ///     LONGHAND_CLEARDESK=1                    Clear Desk: only the page
 ///     LONGHAND_STORYPAGE=1                    a story's Page (with LONGHAND_BOOK=1)
 ///     LONGHAND_BOOKEDIT=1                     a story's page in Edit (with LONGHAND_LIBRARYVIEW=1)
+///     LONGHAND_SCREENPLAY=1|read              the first screenplay, to write or as pages
 enum Snapshot {
     static var wantsChapter: Bool {
         ProcessInfo.processInfo.environment["LONGHAND_CHAPTER"] == "1"
@@ -37,6 +38,11 @@ enum Snapshot {
 
     static var wantsBook: Bool {
         ProcessInfo.processInfo.environment["LONGHAND_BOOK"] == "1"
+    }
+
+    /// `LONGHAND_SCREENPLAY=1` opens the library's first screenplay to write; `=read`, its pages.
+    static var wantsScreenplay: Bool {
+        ProcessInfo.processInfo.environment["LONGHAND_SCREENPLAY"] != nil
     }
 
     private static var environment: [String: String] {
@@ -66,6 +72,7 @@ enum Snapshot {
             AppTheme.modeKey: "system",
             "showCards": environment["LONGHAND_CARDS"] == "1",
             StoryPage.key: environment["LONGHAND_STORYPAGE"] == "1",
+            ScreenplayReader.readingKey: environment["LONGHAND_SCREENPLAY"] == "read",
             // Tests type on the chapter page; pictures show it for reading unless LONGHAND_WRITE=1.
             ChapterDocumentView.readingKey: !(ProcessInfo.processInfo.arguments.contains("--selftest")
                 || ProcessInfo.processInfo.arguments.contains("--perftest") || environment["LONGHAND_WRITE"] == "1"),
@@ -107,9 +114,13 @@ enum Snapshot {
 
     @MainActor
     static func prepareExport(_ store: LibraryStore) {
-        guard environment["LONGHAND_EXPORT"] == "1", let book = Exporter.book(in: store) else { return }
+        guard environment["LONGHAND_EXPORT"] == "1",
+              let book = (wantsScreenplay ? store.library?.books.first(where: \.isScreenplay) : nil) ?? Exporter.book(in: store) else { return }
         // A hidden run can't present a sheet, so the sheet's view gets a window of its own.
-        let view = NSHostingView(rootView: ExportSheet(book: book).environmentObject(store).environmentObject(store.margin))
+        let sheet = book.isScreenplay
+            ? AnyView(ScreenplayExportSheet(book: book).environmentObject(store))
+            : AnyView(ExportSheet(book: book).environmentObject(store).environmentObject(store.margin))
+        let view = NSHostingView(rootView: sheet)
         let window = NSWindow(contentRect: NSRect(x: -30000, y: -30000, width: 560, height: 600),
                               styleMask: [.borderless], backing: .buffered, defer: false)
         window.contentView = view

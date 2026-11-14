@@ -81,7 +81,12 @@ struct CheatSheet: View {
                 }
                 GridRow {
                     section("View") { shortcuts(Self.view) }
-                    section("Markdown") { markdown }
+                    // In a screenplay, how to type one instead of Markdown.
+                    if screenplayOpen {
+                        section("Screenplay") { screenplay }
+                    } else {
+                        section("Markdown") { markdown }
+                    }
                 }
             }
             .padding(18)
@@ -118,6 +123,45 @@ struct CheatSheet: View {
             }
             .padding(.horizontal, 12)
             .frame(height: 30)
+        }
+    }
+
+    private var screenplayOpen: Bool {
+        if case .scene(let url) = store.selection { return url.pathExtension.lowercased() == ProseFile.fountain }
+        return false
+    }
+
+    /// The keys that move between elements, then what to type for each (Fountain).
+    private var screenplay: some View {
+        let keys: [Shortcut] = [
+            Shortcut(label: "Character, on an empty line", keys: [.symbol("arrow.right.to.line")]),
+            Shortcut(label: "Parenthetical, in a speech", keys: [.symbol("arrow.right.to.line")]),
+            Shortcut(label: "On to dialogue or action", keys: [.symbol("return")]),
+        ]
+        let rows: [(String, String)] = [
+            ("INT. ROOM - DAY", "Scene heading"),
+            ("MARA", "Character"),
+            ("(beat)", "Parenthetical"),
+            ("CUT TO:", "Transition"),
+            ("> THE END <", "Centred"),
+            ("[[note]]", "Note, not printed"),
+        ]
+        return Group {
+            shortcuts(keys)
+            ForEach(rows, id: \.0) { row in
+                HStack(spacing: 10) {
+                    Text(row.0)
+                        .font(.system(size: Layout.detailSize, design: .monospaced))
+                        .foregroundStyle(Color(PaperTheme.secondary))
+                        .frame(width: 124, alignment: .leading)
+                    Text(row.1)
+                        .font(.system(size: Layout.chromeSize))
+                        .foregroundStyle(Color(PaperTheme.ink))
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 12)
+                .frame(height: 30)
+            }
         }
     }
 

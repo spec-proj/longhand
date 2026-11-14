@@ -1904,6 +1904,300 @@ enum SelfTest {
                   "shapes: a document's outline is its headings, by level (not code, not #words)")
         }
 
+        // MARK: Screenplays: Fountain on disk, keys, styling, pages, Final Draft (2026-11-14)
+
+        do {
+            func newest() -> Book? { store.library?.books.max { $0.order < $1.order } }
+            store.createBook(title: "Night Ferry", form: .screenplay, shape: .document)
+            let script = newest()
+            let url = script?.document?.url
+            check(script?.isScreenplay == true && url?.lastPathComponent == "Night Ferry.fountain"
+                  && url?.deletingLastPathComponent().canonical == script?.url.canonical,
+                  "screenplay: a new one is one Fountain file, Night Ferry.fountain, in its story's folder")
+            check(!store.canAddScene && !store.canAddChapter && selectedSceneURL == url, "screenplay: it opens at its text and takes no scenes or chapters")
+            if let doc = script?.document {
+                check(Git.isScene(String(doc.url.canonical.path.dropFirst(root.canonical.path.count + 1))),
+                      "screenplay: Git counts the .fountain file as a scene")
+            }
+            let sample = """
+            FADE IN:
+
+            EXT. FERRY TERMINAL - NIGHT
+
+            Rain. One *sodium* lamp.
+
+            MARA
+            One for the last crossing.
+
+            TOMAS
+            (not unkindly)
+            There's no last crossing.
+
+            CUT TO:
+
+            INT. TICKET BOOTH - CONTINUOUS
+
+            A kettle.
+            """
+            store.updateText(sample)
+            store.saveNow()
+            await settle(300)
+            check(disk(url) == sample, "screenplay: typing saves to the .fountain file")
+            // Pages are counted off the main thread: wait for the count (up to three seconds).
+            for _ in 0..<30 where script.flatMap({ $0.document }).map({ store.pages(of: $0) }) != 1 { await settle(100) }
+            check(script.flatMap { $0.document }.map { store.pages(of: $0) } == 1, "screenplay: its length is counted in pages")
+            if let book = script {
+                var info = store.margin.info(for: book.url)
+                info.target = 110
+                store.margin.setInfo(info, for: book.url)
+                let novel = store.library?.books.first { !$0.isScreenplay }
+                let mine = store.targetProgress(of: book), theirs = novel.map(store.targetProgress(of:))
+                check(mine == (1, "pages") && theirs?.unit == "words",
+                      "screenplay: its target counts pages; other stories' count words (\(mine), \(String(describing: theirs)))")
+            }
+            let doc = Fountain.document(sample)
+            check(doc.titlePage.isEmpty && doc.elements.map(\.kind) == [.action, .sceneHeading, .action, .character, .dialogue, .character,
+                                                                     .parenthetical, .dialogue, .transition, .sceneHeading, .action],
+                  "screenplay: Fountain reads each element (FADE IN: is not a title page)")
+            check(Fountain.headings(in: sample).map(\.title) == ["EXT. FERRY TERMINAL - NIGHT", "INT. TICKET BOOTH - CONTINUOUS"]
+                  && OutlineHeading.screenplay(in: sample).map(\.number) == ["1", "2"],
+                  "screenplay: the contents lists its scene headings, numbered")
+            let forced = Fountain.document("Title: X\n\n.OVER BLACK #4A#\n\n@McKENNA\nHi.\n\n> FADE OUT.\n\n>THE END<\n\n!LOUD NOISES\nAnd more.\n\nBRICK\nNo.\n\nSTEEL ^\nNo.")
+            check(forced.title("Title") == ["X"] && forced.elements.map(\.kind) == [.sceneHeading, .character, .dialogue, .transition, .centered, .action, .character, .dialogue, .character, .dialogue]
+                  && forced.elements[0].sceneNumber == "4A" && forced.elements[1].text == "McKENNA" && forced.elements.last(where: { $0.kind == .character })?.dual == true,
+                  "screenplay: forced elements, scene numbers, dual dialogue and a title page are read")
+            check(Fountain.runs("a *b* **c** _d_ \\*e\\*") == [Fountain.Run(text: "a "), Fountain.Run(text: "b", style: .italic), Fountain.Run(text: " "),
+                                                            Fountain.Run(text: "c", style: .bold), Fountain.Run(text: " "),
+                                                            Fountain.Run(text: "d", style: .underline), Fountain.Run(text: " *e*")],
+                  "screenplay: emphasis and escapes")
+
+            // The page: Courier Prime, elements at their places.
+            if let page = margin.textView {
+                let string = page.string as NSString
+                func style(of text: String) -> NSParagraphStyle? {
+                    let at = string.range(of: text).location
+                    return at == NSNotFound ? nil : page.textStorage?.attribute(.paragraphStyle, at: at, effectiveRange: nil) as? NSParagraphStyle
+                }
+                let font = page.textStorage?.attribute(.font, at: 0, effectiveRange: nil) as? NSFont
+                check(font?.fontName.hasPrefix("CourierPrime") == true, "screenplay: the page is set in Courier Prime")
+                let action = style(of: "Rain.")?.headIndent ?? 0
+                let name = style(of: "MARA")?.headIndent ?? 0
+                let speech = style(of: "One for the last")?.headIndent ?? 0
+                let paren = style(of: "(not unkindly)")?.headIndent ?? 0
+                check(action < speech && speech < paren && paren < name, "screenplay: action, dialogue, parenthetical and name sit at their indents")
+                check(style(of: "CUT TO:")?.alignment == .right, "screenplay: a transition is set to the right")
+
+                // Keys: Return after a name goes to dialogue; after dialogue, to a new element.
+                page.window?.makeFirstResponder(page)
+                func caretToEnd() { page.setSelectedRange(NSRange(location: (page.string as NSString).length, length: 0)) }
+                caretToEnd()
+                page.insertText("\n\nINT. ", replacementRange: page.selectedRange())
+                for c in "kitchen - day" { page.insertText(String(c), replacementRange: page.selectedRange()) }
+                check(page.string.hasSuffix("INT. KITCHEN - DAY"), "screenplay: a scene heading is typed in capitals")
+                page.doCommand(by: #selector(NSResponder.insertNewline(_:)))
+                check(page.string.hasSuffix("DAY\n\n"), "screenplay: Return after a heading starts a new element")
+                page.doCommand(by: #selector(NSResponder.insertTab(_:)))
+                for c in "mara" { page.insertText(String(c), replacementRange: page.selectedRange()) }
+                check(page.string.hasSuffix("\n\nMARA") && !page.string.contains("\t"), "screenplay: Tab starts a name, typed in capitals, no tab character")
+                page.doCommand(by: #selector(NSResponder.insertNewline(_:)))
+                check(page.string.hasSuffix("MARA\n"), "screenplay: Return after a name goes on to dialogue")
+                page.doCommand(by: #selector(NSResponder.insertTab(_:)))
+                check(page.string.hasSuffix("MARA\n()") && page.selectedRange().location == (page.string as NSString).length - 1,
+                      "screenplay: Tab in a speech starts a parenthetical")
+                page.insertText("quietly", replacementRange: page.selectedRange())
+                caretToEnd()
+                page.doCommand(by: #selector(NSResponder.insertNewline(_:)))
+                page.insertText("Hello.", replacementRange: page.selectedRange())
+                page.doCommand(by: #selector(NSResponder.insertNewline(_:)))
+                check(page.string.hasSuffix("MARA\n(quietly)\nHello.\n\n"), "screenplay: Return after dialogue starts a new element")
+                await settle(200)
+                check(store.live.element == "Action", "screenplay: the status bar names the element the caret is in")
+                let typed = Fountain.document(page.string).elements.suffix(4).map(\.kind)
+                check(typed == [.sceneHeading, .character, .parenthetical, .dialogue], "screenplay: what was typed reads back as heading, name, parenthetical, dialogue")
+            } else {
+                check(false, "screenplay: the page is on screen")
+            }
+
+            // Pages: a long speech breaks with (MORE) and (CONT'D).
+            var long = "INT. ROOM - DAY\n\n"
+            for i in 0..<30 { long += "Action paragraph \(i) goes on for a while so that it wraps onto a second line.\n\n" }
+            long += "MARA\n" + (0..<40).map { "Sentence \($0) of a long speech." }.joined(separator: " ") + "\n"
+            let laid = ScreenplayLayout.paginate(Fountain.document(long))
+            let rows = laid.pages.flatMap { $0.rows.map { $0.map(\.text).joined() } }
+            check(laid.pages.count >= 2 && rows.contains("(MORE)") && rows.contains("MARA (CONT'D)")
+                  && laid.pages.allSatisfy { $0.rows.count <= ScreenplayLayout.Paper.letter.lines },
+                  "screenplay: a speech across a page break gets (MORE) and (CONT'D); pages hold 54 lines")
+            check(laid.pages.allSatisfy { $0.rows.first?.isEmpty == false }, "screenplay: no page starts with a blank line")
+
+            // Export: PDF, Final Draft, Fountain.
+            if let book = script {
+                store.margin.setInfo({ var i = store.margin.info(for: book.url); i.authorName = "Ruth Calder"; return i }(), for: book.url)
+                let out = root.appendingPathComponent("exports", isDirectory: true)
+                try? fm.createDirectory(at: out, withIntermediateDirectories: true)
+                var choices = ScreenplayChoices()
+                let pdfURL = out.appendingPathComponent("s.pdf")
+                try? Exporter.exportScreenplay(book, store: store, choices: choices, to: pdfURL)
+                let pdf = PDFDocument(url: pdfURL)
+                check((pdf?.pageCount ?? 0) >= 2 && pdf?.page(at: 0)?.string?.contains("NIGHT FERRY") == true
+                      && pdf?.page(at: 0)?.string?.contains("Ruth Calder") == true && pdf?.page(at: 1)?.string?.contains("EXT. FERRY TERMINAL") == true,
+                      "screenplay: the PDF has a title page (title, author) and then the script")
+                choices.format = .finalDraft
+                choices.sceneNumbers = true
+                let fdxURL = out.appendingPathComponent("s.fdx")
+                try? Exporter.exportScreenplay(book, store: store, choices: choices, to: fdxURL)
+                let read = (try? Data(contentsOf: fdxURL)).flatMap(FinalDraft.read)
+                let types = read?.paragraphs.map(\.type) ?? []
+                check(types.prefix(5) == ["Action", "Scene Heading", "Action", "Character", "Dialogue"] && read?.paragraphs[1].number == "1"
+                      && read?.titlePage.contains(where: { $0.text == "Ruth Calder" }) == true,
+                      "screenplay: the Final Draft file has each element as its own paragraph, numbers and a title page")
+                let styledTitle = Fountain.document("Title: **NIGHT** _FERRY_\n\nINT. A - DAY\n")
+                let titleXML = FinalDraft.fdx(styledTitle, titlePage: ScreenplayTitlePage.make(document: styledTitle, storyTitle: "x", author: nil, contact: [], draft: []))
+                check(titleXML.contains("<Text Style=\"Bold\">NIGHT</Text>") && titleXML.contains("<Text Style=\"Underline\">FERRY</Text>") && !titleXML.contains("**"),
+                      "screenplay: a Final Draft title page carries styles, not Fountain's symbols")
+                let dualRows = ScreenplayLayout.paginate(Fountain.document("BRICK\nNo.\nNot again.\n\nSTEEL ^\nYes.\n")).pages[0].rows
+                check(dualRows.count == 3 && dualRows[1].map(\.text) == ["No.", "Yes."] && dualRows[2].map(\.text) == ["Not again."],
+                      "screenplay: dual dialogue sits side by side, keeping each speech's own lines")
+                func plain(_ elements: [Fountain.Element]) -> [String] { elements.map { "\($0.kind)|\($0.text)|\($0.dual)" } }
+                let again = read.map { plain(Fountain.document(FinalDraft.fountain($0)).elements) }
+                check(again == plain(Fountain.document(store.fileText(at: book.document!.url)).elements),
+                      "screenplay: Final Draft and back gives the same script")
+                choices.format = .fountain
+                let fountainURL = out.appendingPathComponent("s.fountain")
+                try? Exporter.exportScreenplay(book, store: store, choices: choices, to: fountainURL)
+                check(disk(fountainURL).hasPrefix("Title: NIGHT FERRY\nCredit: Written by\nAuthor: Ruth Calder\n")
+                      && disk(fountainURL).hasSuffix(store.fileText(at: book.document!.url)),
+                      "screenplay: the Fountain export is the file with a title page at its head")
+
+                // Import: a Final Draft file becomes a new screenplay story.
+                let fdx = """
+                <?xml version="1.0" encoding="UTF-8" standalone="no" ?>
+                <FinalDraft DocumentType="Script" Template="No" Version="4">
+                <Content>
+                <Paragraph Type="Scene Heading" Number="1"><SceneProperties Length="1/8" Page="1" Title=""/><Text>INT. HOUSE - DAY</Text></Paragraph>
+                <Paragraph Type="Action"><Text>A door </Text><Text Style="Bold">slams</Text><Text>.</Text></Paragraph>
+                <Paragraph Number="1A" Type="Scene Heading"><Text Style="Bold">EXT. YARD - DAY</Text><Text></Text></Paragraph>
+                <Paragraph Type="Action"><Text>A line wrapped by an old
+                </Text><Text>import.</Text></Paragraph>
+                <Paragraph Type="Character"><Text>Anna</Text></Paragraph>
+                <Paragraph Type="Parenthetical"><Text>(to herself)</Text></Paragraph>
+                <Paragraph Type="Dialogue"><Text>Not again.</Text><ScriptNote><Paragraph><Text>a note</Text></Paragraph></ScriptNote></Paragraph>
+                <Paragraph Type="Transition"><Text>Dissolve</Text></Paragraph>
+                <Paragraph Type="Shot"><Text>ANGLE ON THE DOOR</Text></Paragraph>
+                <Paragraph><DualDialogue>
+                <Paragraph Type="Character"><Text>BRICK</Text></Paragraph><Paragraph Type="Dialogue"><Text>No.</Text></Paragraph>
+                <Paragraph Type="Character"><Text>STEEL</Text></Paragraph><Paragraph Type="Dialogue"><Text>No.</Text></Paragraph>
+                </DualDialogue></Paragraph>
+                <Paragraph Type="Action" StartsNewPage="Yes"><Text>Later.</Text></Paragraph>
+                </Content>
+                <TitlePage><Content>
+                <Paragraph Alignment="Center"><Text>THE HOUSE</Text></Paragraph>
+                <Paragraph Alignment="Center"><Text>Written by</Text></Paragraph>
+                <Paragraph Alignment="Center"><Text>A. Writer</Text></Paragraph>
+                <Paragraph Alignment="Left"><Text>a@example.com</Text></Paragraph>
+                </Content></TitlePage>
+                </FinalDraft>
+                """
+                let fdxIn = out.appendingPathComponent("The House.fdx")
+                try? fdx.write(to: fdxIn, atomically: true, encoding: .utf8)
+                let imported = store.importFinalDraft(from: fdxIn)
+                let importedText = disk(imported)
+                let importedDoc = Fountain.document(importedText)
+                check(imported?.pathExtension == "fountain" && newest()?.title == "The House" && newest()?.isScreenplay == true,
+                      "import: a Final Draft file becomes a new screenplay story")
+                check(importedDoc.elements.map(\.kind) == [.sceneHeading, .action, .sceneHeading, .action, .character, .parenthetical, .dialogue, .transition, .action,
+                                                          .character, .dialogue, .character, .dialogue, .pageBreak, .action]
+                      && importedDoc.elements[0].sceneNumber == "1" && importedDoc.elements[1].text == "A door **slams**."
+                      && importedDoc.elements[4].text == "ANNA" && importedDoc.elements[7].text == "DISSOLVE"
+                      && importedDoc.elements[11].dual && !importedText.contains("a note"),
+                      "import: headings, numbers, styles, names, transitions, shots, dual dialogue and page breaks come across; notes don't")
+                check(importedDoc.elements[2].sceneNumber == "1A" && Fountain.headings(in: importedText).map(\.title)[1] == "EXT. YARD - DAY"
+                      && Fountain.headings(in: importedText).map(\.number) == ["1", "1A"],
+                      "import: a heading set in bold stays a heading, with its number (owner's script, 2026-11-14)")
+                check(importedDoc.elements[3].text == "A line wrapped by an old import.",
+                      "import: a line break inside a Final Draft paragraph becomes a space")
+                check(importedDoc.title("Title") == ["THE HOUSE"] && importedDoc.title("Author") == ["A. Writer"] && importedDoc.title("Contact") == ["a@example.com"],
+                      "import: the title page comes across as Fountain keys")
+                check(store.importFinalDraft(from: out.appendingPathComponent("s.pdf")) == nil, "import: a file that isn't Final Draft's is refused")
+
+                // Renaming keeps it a screenplay.
+                store.rename(ManuscriptItem(url: book.url, title: book.title, order: book.order, kind: .book), to: "Night Boat")
+                let renamed = store.library?.books.first { $0.title == "Night Boat" }
+                check(renamed?.document?.url.lastPathComponent == "Night Boat.fountain" && renamed?.isScreenplay == true,
+                      "screenplay: renaming the story renames its .fountain file")
+            }
+
+            // A scene with comments, then a screenplay: no highlights carried over.
+            if let commented = store.library?.books.flatMap({ $0.chapters.flatMap(\.scenes) }).first(where: { margin.readComments(for: $0.url).contains { !$0.resolved } }),
+               let other = store.library?.books.first(where: \.isScreenplay)?.document {
+                store.selection = .scene(commented.url)
+                await settle()
+                let before = (margin.textView as? HighlightTextView)?.highlights.count ?? 0
+                store.selection = .scene(other.url)
+                await settle()
+                let after = (margin.textView as? HighlightTextView)?.highlights.count ?? -1
+                if let plainScene = store.library?.books.flatMap({ $0.chapters.flatMap(\.scenes) })
+                    .first(where: { !$0.isScreenplay && margin.readComments(for: $0.url).isEmpty }) {
+                    store.selection = .scene(commented.url)
+                    await settle()
+                    store.selection = .scene(plainScene.url)
+                    await settle()
+                    check((margin.textView as? HighlightTextView)?.highlights.isEmpty == true,
+                          "comments: leaving a scene with comments for one without leaves no highlights behind")
+                }
+                check(before > 0 && after == 0, "screenplay: leaving a scene with comments leaves no highlights on the next page (\(before) → \(after))")
+            }
+            // ⌘R keeps your place: Write → Read shows the same part of the script; Read → Write
+            // comes back to it.
+            if let story = store.library?.books.first(where: \.isScreenplay), let doc = story.document {
+                var long = "FADE IN:\n\n"
+                for n in 1...40 { long += "INT. ROOM \(n) - DAY\n\nAction in room \(n) runs on for a line or two of text, enough to fill a page.\n\nMARA\nLine \(n).\n\n" }
+                store.selection = .scene(doc.url)
+                await settle(300)
+                store.updateText(long)
+                store.saveNow()
+                await settle(400)
+                if let page = margin.textView {
+                    let target = (page.string as NSString).range(of: "INT. ROOM 30 - DAY")
+                    page.setSelectedRange(NSRange(location: target.location, length: 0))
+                    page.restore(Places.Place(caret: target.location, top: target.location))
+                    await settle(200)
+                    func sheets(in view: NSView?) -> SheetsView? {
+                        guard let view else { return nil }
+                        if let found = view as? SheetsView { return found }
+                        for sub in view.subviews { if let found = sheets(in: sub) { return found } }
+                        return nil
+                    }
+                    // Settings change in memory only in a hidden run.
+                    let saved = defaults.volatileDomain(forName: UserDefaults.argumentDomain)
+                    defaults.setVolatileDomain(saved.merging([ScreenplayReader.readingKey: true]) { $1 }, forName: UserDefaults.argumentDomain)
+                    await settle(600)
+                    let window = NSApp.windows.first { sheets(in: $0.contentView) != nil }
+                    let reading = sheets(in: window?.contentView)
+                    let shown = reading?.topSource()
+                    check(shown.map { abs($0 - target.location) < 200 } == true,
+                          "⌘R: Read opens at the part of the script Write was showing (\(shown ?? -1) for \(target.location))")
+                    reading?.show(source: (page.string as NSString).range(of: "INT. ROOM 10 - DAY").location)
+                    await settle(200)
+                    defaults.setVolatileDomain(saved.merging([ScreenplayReader.readingKey: false]) { $1 }, forName: UserDefaults.argumentDomain)
+                    await settle(600)
+                    let back = margin.textView.map { $0.currentPlace.top } ?? -1
+                    let ten = (store.text as NSString).range(of: "INT. ROOM 10 - DAY").location
+                    check(abs(back - ten) < 120, "⌘R: Write comes back at the part of the script Read was showing (\(back) for \(ten))")
+                }
+                store.selection = .scene(doc.url)
+                await settle(200)
+                store.showLibrary()
+                check(store.openBook == nil && store.selection == .book(story.url),
+                      "library: going back to the Library chooses the story you were in (its page, not its text)")
+                store.selection = .scene(doc.url)
+                store.places.opened(store.selection)
+                await settle(200)
+                store.openOnLibrary()
+                check(store.openBook == nil && store.selection == .book(story.url),
+                      "library: opening a library shows the Library, the story last open chosen")
+            }
+        }
+
         // MARK: Author profiles
 
         if let book = store.library?.books.first {
@@ -2062,7 +2356,7 @@ enum SelfTest {
             }
 
             // Numbers off on the story's page hides scene numbers everywhere.
-            if let book = store.library?.books.first(where: { $0.chapters.contains { !$0.scenes.isEmpty } }),
+            if let book = store.library?.books.first(where: { $0.chapters.contains { !$0.scenes.isEmpty && !$0.implicit } }),
                let chapter = book.chapters.first(where: { !$0.scenes.isEmpty }), let scene = chapter.scenes.first {
                 let shown = store.number(ofScene: scene.url)
                 var info = store.margin.info(for: book.url)
@@ -2158,8 +2452,8 @@ enum SelfTest {
             let barItems = NSApp.windows.filter { String(describing: type(of: $0)).contains("StatusBar") && $0.frame.height > 0 }
             check(barItems.isEmpty, "menu bar: a hidden run shows no menu bar item"
                   + (barItems.isEmpty ? "" : " (\(barItems.map { "\(type(of: $0)) visible=\($0.isVisible) frame=\($0.frame)" }))"))
-            check(BookForm.allCases.map(\.title) == ["Novel", "Novella", "Short Story", "Essay", "Notebook"],
-                  "story: the forms are Novel, Novella, Short Story, Essay, Notebook")
+            check(BookForm.allCases.map(\.title) == ["Novel", "Novella", "Short Story", "Essay", "Screenplay", "Notebook"],
+                  "story: the forms are Novel, Novella, Short Story, Essay, Screenplay, Notebook")
 
             // A comment's excerpt in the margin reads as the page does.
             check(CommentContext.plain("did not **understand** it[^why]. See [the card](card.md), _twice_ in snake_case") ==

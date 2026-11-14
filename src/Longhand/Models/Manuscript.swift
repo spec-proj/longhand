@@ -70,6 +70,8 @@ struct Book: Identifiable, Equatable {
     var looseScenes: [Scene] { chapters.first(where: \.implicit)?.scenes ?? [] }
     /// A single document's one file.
     var document: Scene? { shape == .document ? looseScenes.first : nil }
+    /// A screenplay: one Fountain file. It keeps that shape (no splitting into chapters).
+    var isScreenplay: Bool { document?.isScreenplay ?? false }
 }
 
 struct Chapter: Identifiable, Equatable {
@@ -88,6 +90,9 @@ struct Scene: Identifiable, Equatable {
     var url: URL
     var title: String
     var order: Int
+
+    /// A screenplay: a Fountain file (`.fountain`), set as a script.
+    var isScreenplay: Bool { url.pathExtension.lowercased() == ProseFile.fountain }
 }
 
 /// What a story calls its parts (owner, 2026-11-14): a notebook has folders and notes; every

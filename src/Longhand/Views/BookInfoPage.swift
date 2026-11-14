@@ -176,7 +176,7 @@ struct BookInfoPage: View {
             parts.append(AnyView(
                 HStack(spacing: 8) {
                     stripText("\(percent ?? 0)%").fixedSize()
-                    MeterBar(fraction: Double(words) / Double(goal), height: 4).frame(width: 48)
+                    MeterBar(fraction: Double(progress.done) / Double(goal), height: 4).frame(width: 48)
                 }
                 .fixedSize()
                 .help("Target: \(words.formatted()) of \(goal.formatted()) words written")
@@ -261,15 +261,15 @@ struct BookInfoPage: View {
                                     if digits != value { target = digits; return }
                                     update { $0.target = Int(digits).flatMap { $0 > 0 ? $0 : nil } }
                                 }
-                            Text("words")
+                            Text(progress.unit)
                                 .foregroundStyle(Color(PaperTheme.secondary))
                             if let percent {
                                 Chip(text: "\(percent)%", strong: true)
-                                    .help("\(words.formatted()) of \(info.target?.formatted() ?? "") words")
+                                    .help("\(progress.done.formatted()) of \(info.target?.formatted() ?? "") \(progress.unit)")
                             }
                         }
                         if let goal = info.target, goal > 0 {
-                            ProgressRule(fraction: Double(words) / Double(goal))
+                            ProgressRule(fraction: Double(progress.done) / Double(goal))
                                 .frame(width: 260, height: 3)
                         }
                     }
@@ -280,9 +280,12 @@ struct BookInfoPage: View {
 
     private var words: Int { store.wordCount(of: book) }
 
+    /// What the target counts: pages for a screenplay, words for anything else.
+    private var progress: (done: Int, unit: String) { store.targetProgress(of: book) }
+
     private var percent: Int? {
         guard let goal = info.target, goal > 0 else { return nil }
-        return Int((Double(words) / Double(goal) * 100).rounded())
+        return Int((Double(progress.done) / Double(goal) * 100).rounded())
     }
 
     /// The cover in the Kindle shape (1:1.6). Click to choose an image, or drop one on it.

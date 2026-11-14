@@ -71,6 +71,10 @@ Versions….
 
 ## Contents
 
+**Back to the Library** (‹ Library, ⌘4, the path's first place) chooses the story you were in:
+its row is selected and its page shown, never its text left open beside the list (owner,
+2026-11-14).
+
 - **Inside a book (owner, 2026-11-08):** the book heads the column as a card, larger than
   its rows: ‹ (back to every book), its icon (24pt, in its colour), its name (15pt
   semibold, up to two lines), "10 chapters · 25,531 words", and its target rule. Click it
@@ -241,8 +245,11 @@ framed panel.
 
 ### Notes
 
-Three levels, top to bottom: **this scene**, **this chapter** (both written straight into the
-margin, saved as you type), and **the book**. The scene's section starts with its **status**
+**Only the open layer** (owner, 2026-11-14): a scene shows its own notes, a chapter its own,
+the story its own; never the levels above. A single document (a screenplay too) is the story:
+one section under its form ("Screenplay"), with its target, a note typed in place and the
+story's note files. Scene and chapter notes are written straight into the margin, saved as you
+type; the story's are files. The scene's section starts with its **status**
 (Draft / Revised / Done as segments; click the chosen one again to clear it), its
 **synopsis**, and a **word target** with the count so far and a progress rule; then its note.
 After that comes **the book**: its word target (with the count so far and a rule), then: a list of named Markdown files with their dates.
@@ -394,6 +401,26 @@ The format choices are remembered per library in `.longhand/export.json`. After 
   at scene breaks (owner, 2026-11-12), with half a line above and below.
 - What a scene's Markdown becomes: emphasis kept, symbols gone, a level-one heading that only
   repeats the scene's name dropped, `---` a scene break, quotes indented.
+
+## Screenplays (owner, 2026-11-14)
+
+Mock-up: https://claude.ai/artifact/5he383bmwa3ubvzCfKYMbt. A screenplay is a story of one
+Fountain file; its cover in New Document is like every other (owner: "no need for this break
+in design").
+
+- **Write:** Courier Prime, two points under the prose size, rows at 1.45. The column is sixty
+  characters (action's width on paper); names, parentheticals and dialogue sit at Final Draft's
+  indents, transitions to the right. Forcing symbols, emphasis symbols and scene numbers are
+  dimmed; notes, boneyard, sections and synopses are secondary grey.
+- **Contents:** the scene headings, numbered in tertiary like the chapters' numbers. A click
+  goes to the heading (in Read, to its page).
+- **Status bar:** the title, pages in a box, and the element the caret is in, in a box (its
+  tooltip says what Tab and Return do there).
+- **Read | Write** in the toolbar (no Cards), ⌘R. Read: the pages in the theme's card colour,
+  a hairline frame, 24pt apart on the chrome grey, at most 1.25 times print size.
+- **Export:** PDF | Final Draft | Fountain; Paper (PDF only); Include: Title page, Scene
+  numbers; Written by; Draft (the last `draft-N` tag). No line describing each format.
+- **Cheat sheet:** a Screenplay section takes Markdown's place while a screenplay is open.
 
 ## Moving around (Go menu)
 

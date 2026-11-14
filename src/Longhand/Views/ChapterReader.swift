@@ -102,8 +102,27 @@ struct ChapterReader: NSViewRepresentable {
         }
 
         func detach() {
+            // Leaving for Write: it opens at the first words on show here.
+            if let textView, let top = scenePoint(textView.currentPlace.top) {
+                margin.readingAnchor = MarginStore.ReadingAnchor(top: top, caret: nil)
+            }
             overlay?.detach()
             if margin.page === self { margin.page = nil }
+        }
+
+        /// A place on the reading page as a place in its scene's own text.
+        private func scenePoint(_ location: Int) -> (scene: URL, location: Int)? {
+            let point = NSRange(location: location, length: 0)
+            guard let (url, map) = maps.first(where: { $0.value.covers(point) }) else { return nil }
+            return (url, map.source(point).location)
+        }
+
+        /// Come from Write (⌘R): show the same words at the top, then forget them.
+        func applyAnchor() {
+            guard let textView, let anchor = margin.readingAnchor,
+                  let top = (anchor.top ?? anchor.caret).flatMap({ maps[$0.scene]?.page(NSRange(location: $0.location, length: 0)) }) else { return }
+            margin.readingAnchor = nil
+            textView.restore(Places.Place(caret: top.location, top: top.location))
         }
 
         /// Highlights follow new text.
@@ -150,6 +169,8 @@ struct ChapterReader: NSViewRepresentable {
             else { try? line.write(toFile: path, atomically: true, encoding: .utf8) }
         }
         if !sameChapter { textView.scrollToBeginningOfDocument(nil) }
+        // Laid out first, then to where Write was.
+        DispatchQueue.main.async { [weak coordinator] in coordinator?.applyAnchor() }
         // The margin lists the chapter's comments, as it does beside the page for writing.
         margin.page = coordinator
         margin.openChapterPage(scenes: scenes.map(\.url))

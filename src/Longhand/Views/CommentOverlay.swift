@@ -7,7 +7,9 @@ import Combine
 final class CommentOverlay {
     private weak var textView: HighlightTextView?
     private let margin: MarginStore
-    private var painted: [String] = []
+    /// What was last painted; nil forces the next refresh to paint (an empty list is a real
+    /// state: no highlights, which must still replace those of the scene before).
+    private var painted: [String]?
     private var subscriptions: Set<AnyCancellable> = []
 
     init(textView: HighlightTextView, margin: MarginStore) {
@@ -28,7 +30,7 @@ final class CommentOverlay {
 
     /// Repaint even if nothing seems to have changed (after the text itself changed).
     func invalidate() {
-        painted = []
+        painted = nil
         refresh()
     }
 
