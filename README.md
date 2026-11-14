@@ -33,7 +33,7 @@ Themes: `third_party/THEMES.md`.
 Photographs: NASA.  
 Text: H. G. Wells, Edgar Rice Burroughs, Jules Verne and Albert Einstein, from Project Gutenberg.
 
-This is a vibe-coded project. I am not a developer, I just have a Claude licence from work and refuse to pay for Ulysses or Scrivener. I wanted something that blended the two and decided to just go for it. If the code sucks, let me know!
+This is a vibe-coded project. I am not a developer, I just have a Claude licence from work and refuse to pay for Ulysses or Scrivener. I wanted something that blended the two and decided to just go for it. None of the text on this page is AI-generated! If the code sucks, please let me know, or make a pull request.
 
 ## Licence
 
