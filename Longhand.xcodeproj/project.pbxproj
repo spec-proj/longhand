@@ -22,6 +22,7 @@
 		3B3949F48E849FAC7511DAFB /* GitIntro.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4E3195D59E331F766A531C4 /* GitIntro.swift */; };
 		3E4505E4AEDF9C286B08B590 /* HistoryStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7CB750884CCE10E75D14CDA /* HistoryStore.swift */; };
 		464862DC003D09E221F91FA7 /* Comparison.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F9D60761509F82A4E07C767 /* Comparison.swift */; };
+		491591E030B69FB6963C062E /* NewDocumentSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 46EF17C0D4EA92F4BE985CDD /* NewDocumentSheet.swift */; };
 		49800CF2EBCB5811743AA435 /* Places.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C60C4DDC3348ABFC222E295 /* Places.swift */; };
 		51DCEAA7824678C8855C1AC2 /* LonghandApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47C58819F159708C598034D5 /* LonghandApp.swift */; };
 		532A5D0B78CB0E8D3DC19511 /* MarginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A8F9F82DC38DEAF4C6BDD97 /* MarginView.swift */; };
@@ -82,6 +83,7 @@
 		289C0740EF85F025CF4628B8 /* BookWriter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BookWriter.swift; sourceTree = "<group>"; };
 		32CDCE9D4772910984C9A100 /* PathBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PathBar.swift; sourceTree = "<group>"; };
 		37FB2E74E7CD2ABF5689C5CF /* ChangesPane.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChangesPane.swift; sourceTree = "<group>"; };
+		46EF17C0D4EA92F4BE985CDD /* NewDocumentSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewDocumentSheet.swift; sourceTree = "<group>"; };
 		47C58819F159708C598034D5 /* LonghandApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LonghandApp.swift; sourceTree = "<group>"; };
 		4CCD563CB11B3CD49F3B78FF /* ButtonStyles.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ButtonStyles.swift; sourceTree = "<group>"; };
 		4F4DF08F2A179353EE966A5A /* SquareToolbarButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SquareToolbarButton.swift; sourceTree = "<group>"; };
@@ -171,6 +173,7 @@
 				5A8F9F82DC38DEAF4C6BDD97 /* MarginView.swift */,
 				5174837EA5A33F9584005946 /* MarkdownEditor.swift */,
 				535B8CB7A64F4E88EFA0CDF6 /* MenuBarItem.swift */,
+				46EF17C0D4EA92F4BE985CDD /* NewDocumentSheet.swift */,
 				32CDCE9D4772910984C9A100 /* PathBar.swift */,
 				5FA62175765BFF2A11004CF7 /* QuitProgress.swift */,
 				8FDC56717E681F18515FB79B /* RenameSheet.swift */,
@@ -387,6 +390,7 @@
 				08E75D9A0D002A8E64F55E00 /* MarkdownFormat.swift in Sources */,
 				DCEDAFD56F8082CC11A6BB76 /* MarkdownStyler.swift in Sources */,
 				0905A6438C14F5FAA78647FF /* MenuBarItem.swift in Sources */,
+				491591E030B69FB6963C062E /* NewDocumentSheet.swift in Sources */,
 				06F8E2881C1C2A96FAB31135 /* PDFWriter.swift in Sources */,
 				13F20CA463F04A56A9377F62 /* PathBar.swift in Sources */,
 				34CC8EADA789D003C0B2AE68 /* PerfTest.swift in Sources */,

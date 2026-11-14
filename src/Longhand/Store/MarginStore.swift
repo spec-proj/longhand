@@ -72,6 +72,8 @@ struct SceneInfo: Codable, Equatable {
     var hideChapterNumbers: Bool?
     /// The figures the story's page leaves out (owner, 2026-11-13: chosen per story).
     var hiddenFacts: [StoryFact]?
+    /// How the story is divided (chapters and scenes, chapters, scenes, one document).
+    var shape: BookShape?
 
     func shows(_ fact: StoryFact) -> Bool { !(hiddenFacts ?? []).contains(fact) }
 
@@ -91,7 +93,7 @@ struct SceneInfo: Codable, Equatable {
         synopsis.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && status == nil && target == nil
             && stage == nil && form == nil
             && [genre, authorName, authorPenName, authorAddress, authorEmail, authorPhone, previousWorks].allSatisfy { ($0 ?? "").isEmpty }
-            && hideChapterNumbers != true && (hiddenFacts ?? []).isEmpty
+            && hideChapterNumbers != true && (hiddenFacts ?? []).isEmpty && shape == nil
     }
 
     init(synopsis: String = "", status: Status? = nil, target: Int? = nil) {
@@ -119,6 +121,7 @@ struct SceneInfo: Codable, Equatable {
         previousWorks = try? container.decodeIfPresent(String.self, forKey: .previousWorks)
         hideChapterNumbers = try? container.decodeIfPresent(Bool.self, forKey: .hideChapterNumbers)
         hiddenFacts = try? container.decodeIfPresent([StoryFact].self, forKey: .hiddenFacts)
+        shape = try? container.decodeIfPresent(BookShape.self, forKey: .shape)
     }
 }
 
@@ -885,6 +888,64 @@ final class MarginStore: ObservableObject {
         comments.removeAll { gone($0.scene) }
         pageScenes.removeAll { gone($0) }
         if gone(sceneURL) { sceneURL = nil }
+    }
+
+    // MARK: Joining and splitting stories
+
+    /// Writes a scene's comments file (or removes it when there are none).
+    private func writeComments(_ list: [SceneComment], for scene: URL) {
+        guard let url = commentsURL(for: scene) else { return }
+        guard !list.isEmpty else { try? FileManager.default.removeItem(at: url); return }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.dateEncodingStrategy = .iso8601
+        guard let data = try? encoder.encode(CommentFile(comments: list)) else { return }
+        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? data.write(to: url, options: .atomic)
+    }
+
+    /// Join into One Document: each scene's comments move to the document, shifted by where
+    /// that scene's text now starts in it (UTF-16).
+    func mergeComments(_ sources: [(scene: URL, offset: Int)], into target: URL) {
+        saveNow()
+        var merged = readComments(for: target)
+        for source in sources {
+            merged += readComments(for: source.scene).map { comment in
+                var moved = comment
+                moved.location += source.offset
+                moved.scene = target
+                return moved
+            }
+        }
+        writeComments(merged, for: target)
+    }
+
+    /// Split into Chapters: the document's comments go to the part their passage starts in,
+    /// shifted to that part's own text.
+    func splitComments(of source: URL, into parts: [(scene: URL, start: Int, length: Int)]) {
+        saveNow()
+        var lists: [URL: [SceneComment]] = [:]
+        for comment in readComments(for: source) {
+            guard let part = parts.last(where: { comment.location >= $0.start }) ?? parts.first else { continue }
+            var moved = comment
+            moved.location = max(0, min(comment.location - part.start, part.length))
+            moved.length = max(0, min(comment.length, part.length - moved.location))
+            moved.scene = part.scene
+            lists[part.scene, default: []].append(moved)
+        }
+        for (scene, list) in lists { writeComments(list, for: scene) }
+    }
+
+    /// Notes of the items joined, gathered into the target's note, each under its title.
+    func mergeNotes(_ items: [(title: String, item: URL)], into target: URL) {
+        saveNow()
+        let parts = items.compactMap { entry -> String? in
+            let text = noteURL(for: entry.item).map(readText)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return text.isEmpty ? nil : "## \(entry.title)\n\n\(text)"
+        }
+        guard !parts.isEmpty else { return }
+        let existing = noteURL(for: target).map(readText)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        write(([existing].filter { !$0.isEmpty } + parts).joined(separator: "\n\n") + "\n", to: noteURL(for: target))
     }
 
     /// Everything kept beside the manuscript in `.longhand/`, by folder and file extension.

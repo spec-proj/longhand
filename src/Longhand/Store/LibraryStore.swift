@@ -462,7 +462,31 @@ final class LibraryStore: ObservableObject {
             }
 
             chapters.sort(by: ordered)
-            return Book(url: bookURL, title: bookName.title, order: bookName.order, chapters: chapters, folder: folder)
+
+            // The shape the story was given; the files on disk have the last word.
+            let stored = Self.storedShape(of: bookURL, root: root)
+            var shape: BookShape
+            if chapters.isEmpty {
+                // Scenes only, or one document: Markdown files straight in the story's folder,
+                // read as the scenes of an implicit chapter that is the story's folder itself.
+                var scenes: [Scene] = []
+                for rawSceneURL in chapterURLs where rawSceneURL.pathExtension.lowercased() == "md" && !isDirectory(rawSceneURL) {
+                    let sceneURL = rawSceneURL.canonical
+                    let sceneName = FileNaming.decode(sceneURL.deletingPathExtension().lastPathComponent)
+                    counts[sceneURL] = Self.wordCount(read(sceneURL))
+                    scenes.append(Scene(url: sceneURL, title: sceneName.title, order: sceneName.order))
+                }
+                scenes.sort(by: ordered)
+                if scenes.isEmpty && !(stored == .scenes || stored == .document) {
+                    shape = stored ?? .chaptersAndScenes
+                } else {
+                    chapters = [Chapter(url: bookURL, title: bookName.title, order: 0, scenes: scenes, implicit: true)]
+                    shape = stored == .scenes || scenes.count > 1 ? .scenes : .document
+                }
+            } else {
+                shape = stored == .chapters ? .chapters : .chaptersAndScenes
+            }
+            return Book(url: bookURL, title: bookName.title, order: bookName.order, chapters: chapters, folder: folder, shape: shape)
         }
 
         for rawURL in bookURLs where isDirectory(rawURL) {
@@ -489,6 +513,17 @@ final class LibraryStore: ObservableObject {
             library: Library(url: root, name: root.lastPathComponent, books: books, folders: folders),
             counts: counts
         )
+    }
+
+    /// The shape kept with a story's details (`.longhand/scenes/<Story>.json`), read while
+    /// scanning, before the margin has loaded them.
+    static func storedShape(of book: URL, root: URL) -> BookShape? {
+        let base = root.canonical.path + "/"
+        let path = book.canonical.path
+        guard path.hasPrefix(base) else { return nil }
+        let url = root.appendingPathComponent(".longhand/scenes/\(path.dropFirst(base.count)).json")
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        return (try? JSONDecoder().decode(SceneInfo.self, from: data))?.shape
     }
 
     private func ordered<T>(_ a: T, _ b: T, order: (T) -> Int, title: (T) -> String) -> Bool {
@@ -671,19 +706,43 @@ final class LibraryStore: ObservableObject {
 
     // MARK: - Creating
 
-    func createBook() {
+    /// File › New Document (owner, 2026-11-14): shows the sheet of forms (`NewDocumentSheet`).
+    @Published var newDocumentShown = false
+
+    /// A new story of the chosen form, divided as chosen, opened at its first page of text.
+    func createBook(title rawTitle: String = "", form: BookForm? = nil, shape: BookShape = .chaptersAndScenes) {
         guard let root = libraryURL else { return }
         let books = library?.books ?? []
         let order = (books.map(\.order).max() ?? 0) + 1
+        let trimmed = rawTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        let title = trimmed.isEmpty ? "Untitled \(form?.title ?? "Story")" : trimmed
         let bookURL = FileNaming.unique(root.appendingPathComponent(
-            FileNaming.name(order: order, title: "Untitled Story")
+            FileNaming.name(order: order, title: title)
         )).canonical
 
         do {
             try FileManager.default.createDirectory(at: bookURL, withIntermediateDirectories: true)
-            let chapterURL = try createChapterFolder(in: bookURL, title: "Chapter One", order: 1)
-            let sceneURL = try createSceneFile(in: chapterURL, title: "Untitled Scene", order: 1)
+            let sceneURL: URL
+            let names = PartNames.of(form)
+            let firstChapter = "\(names.chapter) One"
+            switch shape {
+            case .chaptersAndScenes:
+                let chapterURL = try createChapterFolder(in: bookURL, title: firstChapter, order: 1)
+                sceneURL = try createSceneFile(in: chapterURL, title: "Untitled \(names.scene)", order: 1)
+            case .chapters:
+                let chapterURL = try createChapterFolder(in: bookURL, title: firstChapter, order: 1)
+                sceneURL = try createSceneFile(in: chapterURL, title: firstChapter, order: nil)
+            case .scenes:
+                sceneURL = try createSceneFile(in: bookURL, title: "Untitled \(names.scene)", order: 1)
+            case .document:
+                sceneURL = try createSceneFile(in: bookURL, title: FileNaming.decode(bookURL.lastPathComponent).title, order: nil)
+            }
+            var info = margin.info(for: bookURL)
+            info.form = form
+            info.shape = shape == .chaptersAndScenes ? nil : shape
+            margin.setInfo(info, for: bookURL)
             reload(select: .none)
+            openBook = bookURL
             selection = .scene(sceneURL)
         } catch {
             errorMessage = "Couldn’t create a story."
@@ -739,10 +798,11 @@ final class LibraryStore: ObservableObject {
             errorMessage = "Couldn’t move it."
             return
         }
-        // A folder that shape alone made a group stays one when its last story leaves.
-        if let old = current.folder {
-            LibraryFolders.setListed(LibraryFolders.listed(root) + [old.lastPathComponent], in: root)
-        }
+        // A folder that shape alone made a group stays one when its last story leaves, and a
+        // folder a story goes into is listed by name: a single document (a file straight in its
+        // story's folder) would otherwise make it look like a story itself.
+        let named = [current.folder, folder].compactMap { $0?.lastPathComponent }
+        LibraryFolders.setListed(Array(Set(LibraryFolders.listed(root) + named)), in: root)
         follow([(book, destination.canonical)])
     }
 
@@ -764,13 +824,39 @@ final class LibraryStore: ObservableObject {
         reload(select: .keep)
     }
 
+    /// What a story calls its parts (a notebook: folders and notes).
+    func names(of bookURL: URL?) -> PartNames {
+        bookURL.map { PartNames.of(margin.info(for: $0).form) } ?? .story
+    }
+
+    /// The names in the story in hand (the menus' New Scene and New Chapter).
+    var contextNames: PartNames { names(of: contextBook?.url) }
+
+    /// The names in the story an item belongs to.
+    func names(for item: ManuscriptItem) -> PartNames {
+        switch item.kind {
+        case .book: return names(of: item.url)
+        case .chapter: return names(of: library?.books.first { $0.chapters.contains { $0.url == item.url } }?.url)
+        case .scene: return names(of: location(ofScene: item.url)?.book.url)
+        }
+    }
+
+    /// Whether the story in hand can take a new chapter, or a new scene: a single document
+    /// takes neither, a scenes-only story no chapters, a chapters-only story no scenes.
+    var canAddChapter: Bool { contextBook?.shape.hasChapters ?? false }
+    var canAddScene: Bool { contextBook?.shape.hasScenes ?? false }
+
     func createChapterInContext() {
         // Chapters are made inside a story; a new story is made in the Library.
-        guard let book = contextBook else { return }
+        guard let book = contextBook, book.shape.hasChapters else { return }
         do {
             let order = (book.chapters.map(\.order).max() ?? 0) + 1
-            let chapterURL = try createChapterFolder(in: book.url, title: "Untitled Chapter", order: order)
-            let sceneURL = try createSceneFile(in: chapterURL, title: "Untitled Scene", order: 1)
+            let names = self.names(of: book.url)
+            let chapterURL = try createChapterFolder(in: book.url, title: "Untitled \(names.chapter)", order: order)
+            // Chapters only: the chapter's one file carries the chapter's name.
+            let sceneURL = book.shape == .chapters
+                ? try createSceneFile(in: chapterURL, title: "Untitled \(names.chapter)", order: nil)
+                : try createSceneFile(in: chapterURL, title: "Untitled \(names.scene)", order: 1)
             reload(select: .none)
             selection = .scene(sceneURL)
         } catch {
@@ -779,13 +865,15 @@ final class LibraryStore: ObservableObject {
     }
 
     func createSceneInContext() {
+        guard contextBook?.shape.hasScenes ?? true else { return }
         if let chapter = contextChapter {
             createScene(in: chapter)
         } else if let book = contextBook {
             do {
                 let order = (book.chapters.map(\.order).max() ?? 0) + 1
-                let chapterURL = try createChapterFolder(in: book.url, title: "Untitled Chapter", order: order)
-                let sceneURL = try createSceneFile(in: chapterURL, title: "Untitled Scene", order: 1)
+                let names = self.names(of: book.url)
+                let chapterURL = try createChapterFolder(in: book.url, title: "Untitled \(names.chapter)", order: order)
+                let sceneURL = try createSceneFile(in: chapterURL, title: "Untitled \(names.scene)", order: 1)
                 reload(select: .none)
                 selection = .scene(sceneURL)
             } catch {
@@ -797,7 +885,9 @@ final class LibraryStore: ObservableObject {
     private func createScene(in chapter: Chapter) {
         do {
             let order = (chapter.scenes.map(\.order).max() ?? 0) + 1
-            let url = try createSceneFile(in: chapter.url, title: "Untitled Scene", order: order)
+            // In the story's words: a chapter's folder is the story's, or (loose scenes) the story itself.
+            let story = chapter.implicit ? chapter.url : chapter.url.deletingLastPathComponent().canonical
+            let url = try createSceneFile(in: chapter.url, title: "Untitled \(names(of: story).scene)", order: order)
             reload(select: .none)
             selection = .scene(url)
         } catch {
@@ -811,10 +901,11 @@ final class LibraryStore: ObservableObject {
         return url.canonical
     }
 
-    private func createSceneFile(in chapterURL: URL, title: String, order: Int) throws -> URL {
-        let url = FileNaming.unique(chapterURL.appendingPathComponent(
-            FileNaming.name(order: order, title: title) + ".md"
-        ))
+    /// A new Markdown file. Without an order its name is just the title (a single document's
+    /// file, or a chapters-only chapter's).
+    private func createSceneFile(in chapterURL: URL, title: String, order: Int?) throws -> URL {
+        let name = order.map { FileNaming.name(order: $0, title: title) } ?? FileNaming.sanitized(title)
+        let url = FileNaming.unique(chapterURL.appendingPathComponent(name + ".md"))
         try "".write(to: url, atomically: true, encoding: .utf8)
         return url.canonical
     }
@@ -827,8 +918,28 @@ final class LibraryStore: ObservableObject {
         saveNow()
 
         do {
+            // A chapters-only chapter's file, or a single document, carries the name too.
+            let inner: URL? = {
+                switch item.kind {
+                case .chapter:
+                    guard let found = library?.books.first(where: { $0.chapters.contains { $0.url == item.url } }),
+                          found.shape == .chapters else { return nil }
+                    return found.chapters.first { $0.url == item.url }?.scenes.first?.url
+                case .book: return book(for: item.url)?.document?.url
+                case .scene: return nil
+                }
+            }()
             let newURL = try renameFile(item.url, kind: item.kind, order: item.order, title: trimmed)
-            follow([(item.url, newURL)])
+            var moves: [(from: URL, to: URL)] = []
+            if let inner, let carried = Self.relocated(inner, from: item.url, to: newURL) {
+                let named = FileNaming.unique(carried.deletingLastPathComponent().appendingPathComponent(FileNaming.sanitized(trimmed) + ".md"))
+                if named.lastPathComponent != carried.lastPathComponent, (try? FileManager.default.moveItem(at: carried, to: named)) != nil {
+                    // First, so the file's own move wins over its folder's.
+                    moves.append((inner, named.canonical))
+                }
+            }
+            moves.append((item.url, newURL))
+            follow(moves)
         } catch {
             errorMessage = "Couldn’t rename \(item.kind == .book ? "the story" : item.kind == .chapter ? "the chapter" : "the scene")."
         }
@@ -937,6 +1048,149 @@ final class LibraryStore: ObservableObject {
             follow(moves)
             errorMessage = "Couldn’t move that scene."
         }
+    }
+
+    // MARK: - Changing a story's shape
+
+    /// Join into One Document: every chapter and scene, in order, into one file in the story's
+    /// folder. Chapter titles become `#` headings and `* * *` marks each break between scenes.
+    /// Comments move with their passages; notes gather into the document's note. The old files
+    /// go to the Trash (and stay in the story's history).
+    func joinIntoOneDocument(_ bookURL: URL) {
+        guard let book = book(for: bookURL), book.shape != .document else { return }
+        saveNow()
+        var text = ""
+        var sources: [(scene: URL, offset: Int)] = []
+        var notes: [(title: String, item: URL)] = []
+        for chapter in book.chapters {
+            if !chapter.implicit {
+                if !text.isEmpty { text += "\n\n" }
+                text += "# \(chapter.title)\n\n"
+                notes.append((chapter.title, chapter.url))
+            }
+            for (index, scene) in chapter.scenes.enumerated() {
+                if index > 0 { text += "\n\n* * *\n\n" }
+                // Only the end is trimmed: comments count from the start of the scene's text.
+                var body = read(scene.url)
+                while let last = body.last, last.isWhitespace { body.removeLast() }
+                sources.append((scene.url, (text as NSString).length))
+                text += body
+                notes.append((scene.title, scene.url))
+            }
+        }
+        text += "\n"
+        let documentURL = FileNaming.unique(book.url.appendingPathComponent(FileNaming.sanitized(book.title) + ".md")).canonical
+        do {
+            try text.write(to: documentURL, atomically: true, encoding: .utf8)
+        } catch {
+            errorMessage = "Couldn’t join the story."
+            return
+        }
+        margin.mergeComments(sources, into: documentURL)
+        margin.mergeNotes(notes, into: documentURL)
+        // The old files, to the Trash: chapter folders whole, or a scenes-only story's files.
+        let old = book.chapters.flatMap { $0.implicit ? $0.scenes.map(\.url) : [$0.url] }
+        if let active = activeSceneURL, old.contains(where: { Self.relocated(active, from: $0, to: $0) != nil }) { activeSceneURL = nil }
+        for url in old {
+            try? FileManager.default.trashItem(at: url, resultingItemURL: nil)
+            margin.trash(url)
+        }
+        setShape(.document, of: book.url)
+        reload(select: .none)
+        openBook = book.url
+        selection = .scene(documentURL)
+    }
+
+    /// Split into Chapters: a single document is cut at its headings (`#`, or `##` if it has
+    /// no `#`), each becoming a chapter with one scene; text before the first heading becomes
+    /// "Opening", and a document without headings becomes Chapter One. A scenes-only story's
+    /// scenes go into Chapter One. Comments move with their passages.
+    func splitIntoChapters(_ bookURL: URL) {
+        guard let book = book(for: bookURL), book.shape == .document || book.shape == .scenes else { return }
+        saveNow()
+        do {
+            if book.shape == .scenes {
+                let chapterURL = try createChapterFolder(in: book.url, title: "\(names(of: book.url).chapter) One", order: 1)
+                var moves: [(from: URL, to: URL)] = []
+                for scene in book.looseScenes {
+                    let destination = chapterURL.appendingPathComponent(scene.url.lastPathComponent)
+                    try FileManager.default.moveItem(at: scene.url, to: destination)
+                    moves.append((scene.url, destination.canonical))
+                }
+                setShape(.chaptersAndScenes, of: book.url)
+                follow(moves)
+                openBook = book.url
+                return
+            }
+            guard let document = book.document else { return }
+            let text = read(document.url) as NSString
+            let parts = Self.chapterParts(of: text as String)
+            var made: [(scene: URL, start: Int, length: Int)] = []
+            for (index, part) in parts.enumerated() {
+                let chapterURL = try createChapterFolder(in: book.url, title: part.title, order: index + 1)
+                let sceneURL = try createSceneFile(in: chapterURL, title: part.title, order: 1)
+                let body = text.substring(with: NSRange(location: part.start, length: part.length))
+                try (body + "\n").write(to: sceneURL, atomically: true, encoding: .utf8)
+                made.append((sceneURL, part.start, part.length))
+            }
+            margin.splitComments(of: document.url, into: made)
+            if let first = made.first?.scene { margin.mergeNotes([(book.title, document.url)], into: first) }
+            if activeSceneURL == document.url { activeSceneURL = nil }
+            try? FileManager.default.trashItem(at: document.url, resultingItemURL: nil)
+            margin.trash(document.url)
+            setShape(.chaptersAndScenes, of: book.url)
+            reload(select: .none)
+            openBook = book.url
+            if let first = made.first?.scene { selection = .scene(first) }
+        } catch {
+            errorMessage = "Couldn’t split the story."
+            reload(select: .keep)
+        }
+    }
+
+    /// Where a document's chapters start and end (UTF-16), and their titles. The heading lines
+    /// themselves are left out: the chapter's folder carries the title.
+    static func chapterParts(of text: String) -> [(title: String, start: Int, length: Int)] {
+        let ns = text as NSString
+        func headings(_ marks: String) -> [(title: String, line: NSRange)] {
+            var found: [(String, NSRange)] = []
+            ns.enumerateSubstrings(in: NSRange(location: 0, length: ns.length), options: [.byLines, .substringNotRequired]) { _, line, enclosing, _ in
+                let content = ns.substring(with: line)
+                guard content.hasPrefix(marks + " ") else { return }
+                let title = content.dropFirst(marks.count + 1).trimmingCharacters(in: .whitespaces)
+                if !title.isEmpty { found.append((title, enclosing)) }
+            }
+            return found
+        }
+        var marks = headings("#")
+        if marks.isEmpty { marks = headings("##") }
+        func trimmed(_ start: Int, _ end: Int) -> (Int, Int) {
+            var a = start, b = end
+            let space = CharacterSet.whitespacesAndNewlines
+            while a < b, let scalar = UnicodeScalar(ns.character(at: a)), space.contains(scalar) { a += 1 }
+            while b > a, let scalar = UnicodeScalar(ns.character(at: b - 1)), space.contains(scalar) { b -= 1 }
+            return (a, b - a)
+        }
+        guard !marks.isEmpty else {
+            let (start, length) = trimmed(0, ns.length)
+            return [("Chapter One", start, length)]
+        }
+        var parts: [(title: String, start: Int, length: Int)] = []
+        let (openingStart, openingLength) = trimmed(0, marks[0].line.location)
+        if openingLength > 0 { parts.append(("Opening", openingStart, openingLength)) }
+        for (index, mark) in marks.enumerated() {
+            let end = index + 1 < marks.count ? marks[index + 1].line.location : ns.length
+            let (start, length) = trimmed(NSMaxRange(mark.line), end)
+            parts.append((mark.title, start, length))
+        }
+        return parts
+    }
+
+    /// Keeps a story's shape with its details (nothing is written for chapters and scenes).
+    private func setShape(_ shape: BookShape, of bookURL: URL) {
+        var info = margin.info(for: bookURL)
+        info.shape = shape == .chaptersAndScenes ? nil : shape
+        margin.setInfo(info, for: bookURL)
     }
 
     func delete(_ item: ManuscriptItem) {
@@ -1112,7 +1366,10 @@ final class LibraryStore: ObservableObject {
         for book in library.books {
             for (chapterIndex, chapter) in book.chapters.enumerated() {
                 if let index = chapter.scenes.firstIndex(where: { $0.url == url }) {
-                    guard margin.info(for: book.url).hideChapterNumbers != true else { return nil }
+                    guard margin.info(for: book.url).hideChapterNumbers != true, book.shape != .document else { return nil }
+                    // Scenes only: 1, 2, 3. Chapters only: the chapter's number.
+                    if chapter.implicit { return "\(index + 1)" }
+                    if book.shape == .chapters { return "\(chapterIndex + 1)" }
                     return "\(chapterIndex + 1).\(index + 1)"
                 }
             }
@@ -1126,7 +1383,7 @@ final class LibraryStore: ObservableObject {
         guard let library else { return nil }
         for book in library.books {
             if let index = book.chapters.firstIndex(where: { $0.url == url }) {
-                return margin.info(for: book.url).hideChapterNumbers == true ? nil : index + 1
+                return margin.info(for: book.url).hideChapterNumbers == true || book.chapters[index].implicit ? nil : index + 1
             }
         }
         return nil
@@ -1217,7 +1474,9 @@ final class LibraryStore: ObservableObject {
     /// View › Clear Desk (⌘.): only the page. The contents, margin, toolbar, status bar and
     /// the page's header fade where they stand (so the text never moves); the same keys or Escape bring them back. Not kept
     /// between launches, so Longhand never opens looking empty.
-    @Published var deskCleared = false
+    @Published var deskCleared = false {
+        didSet { PageMarks.deskCleared = deskCleared }
+    }
     /// The book the contents column is inside; nil for the Library (every book). A book
     /// selected in the Library shows its Book Info page; inside it, the whole book as cards.
     @Published var openBook: URL?
@@ -1225,6 +1484,23 @@ final class LibraryStore: ObservableObject {
     @Published var switcherShown = false
     /// Scenes opened, most recent first (the scene switcher's order).
     private(set) var recentScenes: [URL] = []
+    /// ⇧⌘L, the document switcher (`SceneSwitcher(documents: true)`): every story.
+    @Published var documentSwitcherShown = false
+
+    /// Goes into a story where you last were: the scene last open in it, else its single
+    /// document or first scene, else its page.
+    func openDocument(_ url: URL) {
+        guard let book = library?.books.first(where: { $0.url == url }) else { return }
+        let scenes = book.chapters.flatMap(\.scenes)
+        if let recent = recentScenes.first(where: { scene in scenes.contains { $0.url == scene } }) {
+            selection = .scene(recent)
+        } else if let first = book.document ?? scenes.first {
+            selection = .scene(first.url)
+        } else {
+            selection = .book(book.url)
+        }
+        openBook = book.url
+    }
 
     // MARK: Moving between scenes and chapters (Go menu)
 

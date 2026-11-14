@@ -32,10 +32,14 @@ struct SidebarView: View {
     }
 
     @State private var collapsedChapters: Set<URL> = []
+    /// A single document's headings (owner, 2026-11-14): its outline, in place of chapters.
+    @State private var outline: [OutlineHeading] = []
     @State private var collapsedFolders: Set<URL> = []
     @State private var renameFolder: Folder?
     @State private var renameTarget: ManuscriptItem?
     @State private var deleteTarget: ManuscriptItem?
+    /// A story waiting for Join into One Document to be confirmed.
+    @State private var joinTarget: Book?
     /// The row being dragged, and the row it is over: scenes and chapters are reordered by
     /// dragging, as on the cards.
     @State private var dragging: Selection?
@@ -76,20 +80,36 @@ struct SidebarView: View {
                             if let book = openBook(in: library) {
                                 // The book itself is the header above; here its chapters,
                                 // a hairline between one chapter and the next.
-                                ForEach(Array(book.chapters.enumerated()), id: \.element.id) { index, chapter in
+                                // Scenes only: the story's scenes, numbered 1, 2, 3, with no
+                                // chapter above them. One document: nothing (the card opens it).
+                                if book.shape == .document, let document = book.document {
+                                    ForEach(outline) { heading in
+                                        headingRow(heading, in: document.url)
+                                    }
+                                }
+                                if book.shape == .scenes {
+                                    let numbered = !hideNumbers(book)
+                                    let widest = numbered ? Self.numberWidth("\(book.looseScenes.count)") : 0
+                                    ForEach(Array(book.looseScenes.enumerated()), id: \.element.id) { place, scene in
+                                        sceneRow(scene, number: numbered ? "\(place + 1)" : nil, numberWidth: widest, flat: true)
+                                    }
+                                }
+                                ForEach(Array(book.chapters.filter { !$0.implicit }.enumerated()), id: \.element.id) { index, chapter in
                                     if index > 0 {
-                                        // (The 8pt above this line is the end of the chapter
+                                        // A little space between chapters, no line (owner,
+                                        // 2026-11-14). (The 8pt above is the end of the chapter
                                         // before, where a dragged scene can be dropped.)
-                                        Rectangle()
-                                            .fill(Color(PaperTheme.hairline))
-                                            .frame(height: 1)
-                                            .padding(.leading, Layout.pad)
-                                            .padding(.bottom, 8)
+                                        Color.clear.frame(height: 4)
                                     }
                                     let numbered = !hideNumbers(book)
-                                    chapterRow(chapter, number: numbered ? index + 1 : nil)
+                                    if book.shape == .chapters {
+                                        // Chapters only: the chapter is its one file.
+                                        chapterOnlyRow(chapter, number: numbered ? index + 1 : nil)
+                                    } else {
+                                        chapterRow(chapter, number: numbered ? index + 1 : nil)
+                                    }
 
-                                    if !collapsedChapters.contains(chapter.url) {
+                                    if book.shape == .chaptersAndScenes && !collapsedChapters.contains(chapter.url) {
                                         // Numbered by where they sit: 2.1, 2.2. Moving a
                                         // scene renumbers it.
                                         // The widest number in the chapter sets where its scenes'
@@ -157,9 +177,11 @@ struct SidebarView: View {
                     // (a quarter of the time it took to open a chapter).
                     if let selection, !onScreen.rows.contains(selection) { reader.scrollTo(selection) }
                 }
-                .onAppear { enterBook(of: store.selection) }
+                .onAppear { enterBook(of: store.selection); refreshOutline() }
                 // Rows taken away don't always say they've left the screen.
-                .onChange(of: store.openBook) { onScreen.rows.removeAll() }
+                .onChange(of: store.openBook) { onScreen.rows.removeAll(); refreshOutline() }
+                // The outline follows what is saved (Changes look again after each save).
+                .onReceive(store.versions.changes.$generation) { _ in refreshOutline() }
             }
             .overlay {
                 if let library = store.library, library.books.isEmpty {
@@ -203,6 +225,19 @@ struct SidebarView: View {
             RenameSheet(title: item.title) { newTitle in
                 store.rename(item, to: newTitle)
             }
+        }
+        .alert(
+            "Join “\(joinTarget?.title ?? "")” into one document?",
+            isPresented: Binding(get: { joinTarget != nil }, set: { if !$0 { joinTarget = nil } })
+        ) {
+            Button("Join") {
+                if let book = joinTarget { store.joinIntoOneDocument(book.url) }
+                joinTarget = nil
+            }
+            .keyboardShortcut(.defaultAction)
+            Button("Cancel", role: .cancel) { joinTarget = nil }
+        } message: {
+            Text(joinMessage)
         }
         .alert(
             "Move to Trash?",
@@ -325,6 +360,11 @@ struct SidebarView: View {
 
     private func dropAtEnd(_ items: [String], of chapter: Chapter, last: Bool) -> Bool {
         guard let item = items.first, let library = store.library else { return false }
+        if let dragged = chapterOfFile(item) {
+            guard last, dragged.chapter.url != chapter.url else { return false }
+            store.placeChapter(dragged.chapter.url, at: dragged.book.chapters.count - 1)
+            return true
+        }
         if item.hasPrefix("chapter:") {
             let dragged = URL(fileURLWithPath: String(item.dropFirst("chapter:".count))).canonical
             guard last, dragged != chapter.url,
@@ -364,8 +404,24 @@ struct SidebarView: View {
         }
     }
 
+    /// A chapters-only story's rows carry their chapter's file: moving one moves the chapter.
+    private func chapterOfFile(_ item: String) -> (book: Book, chapter: Chapter)? {
+        guard !item.hasPrefix("chapter:"), !item.hasPrefix("story:"),
+              let found = store.location(ofScene: URL(fileURLWithPath: item).canonical),
+              found.book.shape == .chapters else { return nil }
+        return found
+    }
+
     private func drop(_ items: [String], on tag: Selection) -> Bool {
         guard let item = items.first, let library = store.library else { return false }
+        if let dragged = chapterOfFile(item) {
+            guard case .scene(let target) = tag, let over = store.location(ofScene: target),
+                  over.book.url == dragged.book.url, over.chapter.url != dragged.chapter.url,
+                  let index = dragged.book.chapters.filter({ $0.url != dragged.chapter.url }).firstIndex(where: { $0.url == over.chapter.url })
+            else { return false }
+            store.placeChapter(dragged.chapter.url, at: index)
+            return true
+        }
         if item.hasPrefix("chapter:") {
             let dragged = URL(fileURLWithPath: String(item.dropFirst("chapter:".count))).canonical
             guard case .chapter(let target) = tag, target != dragged,
@@ -398,6 +454,12 @@ struct SidebarView: View {
             return library.books.filter { $0.folder.map { !collapsedFolders.contains($0) } ?? true }.map { .book($0.url) }
         }
         var rows: [Selection] = [.book(book.url)]
+        switch book.shape {
+        case .document: return rows
+        case .scenes: return rows + book.looseScenes.map { .scene($0.url) }
+        case .chapters: return rows + book.chapters.compactMap { $0.scenes.first.map { .scene($0.url) } }
+        case .chaptersAndScenes: break
+        }
         for chapter in book.chapters {
             rows.append(.chapter(chapter.url))
             guard !collapsedChapters.contains(chapter.url) else { continue }
@@ -432,7 +494,10 @@ struct SidebarView: View {
         switch selection {
         case .book: return
         case .chapter(let url): bookURL = url.deletingLastPathComponent().canonical
-        case .scene(let url): bookURL = url.deletingLastPathComponent().deletingLastPathComponent().canonical
+        case .scene(let url):
+            // A scene's story by looking it up: a loose scene sits straight in the story's folder.
+            guard let found = store.location(ofScene: url)?.book.url else { return }
+            bookURL = found
         }
         guard let book = library.books.first(where: { $0.url.canonical == bookURL }), book.url != store.openBook else { return }
         store.openBook = book.url
@@ -488,6 +553,11 @@ struct SidebarView: View {
 
             Button {
                 focused = true
+                // A single document: the card opens it. Otherwise the story's page or cards.
+                if let document = book.document {
+                    if store.selection != .scene(document.url) { store.selection = .scene(document.url) }
+                    return
+                }
                 showCards = true
                 if store.selection != .book(book.url) { store.selection = .book(book.url) }
             } label: {
@@ -529,9 +599,9 @@ struct SidebarView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .help("Show the story as cards")
+            .help(book.shape == .document ? "Open the document" : "Show the story as cards")
             .frame(maxWidth: .infinity, alignment: .leading)
-            .rowBackground(selected ? Color(PaperTheme.selection) : .clear)
+            .rowBackground(selected || (book.document.map { store.selection == .scene($0.url) } ?? false) ? Color(PaperTheme.selection) : .clear)
             .padding(.vertical, 4)
             .contextMenu { bookMenu(book) }
         }
@@ -600,11 +670,19 @@ struct SidebarView: View {
 
     @ViewBuilder
     private func bookMenu(_ book: Book) -> some View {
-        Button("New Chapter") {
-            store.selection = .book(book.url)
-            store.createChapterInContext()
+        if book.shape.hasChapters {
+            Button("New \(store.names(of: book.url).chapter)") {
+                store.selection = .book(book.url)
+                store.createChapterInContext()
+            }
         }
         Button("Rename…") { renameTarget = item(for: book) }
+        if book.shape == .document || book.shape == .scenes {
+            Button("Split into \(store.names(of: book.url).chapters)") { store.splitIntoChapters(book.url) }
+        }
+        if book.shape != .document {
+            Button("Join into One Document…") { joinTarget = book }
+        }
         if let folders = store.library?.folders, !folders.isEmpty {
             Menu("Move to") {
                 ForEach(folders.filter { $0.url != book.folder }) { folder in
@@ -647,7 +725,7 @@ struct SidebarView: View {
             tag: .chapter(chapter.url),
             disclosure: (collapsedChapters.contains(chapter.url), { toggle(&collapsedChapters, chapter.url) })
         ) {
-            Button("New Scene") {
+            Button("New \(store.names(of: chapter.url.deletingLastPathComponent().canonical).scene)") {
                 store.selection = .chapter(chapter.url)
                 store.createSceneInContext()
             }
@@ -662,12 +740,99 @@ struct SidebarView: View {
         }
     }
 
+    /// A heading in a single document's outline, indented by its level. Clicking it brings the
+    /// heading to the top of the page, with the caret at its end.
+    private func headingRow(_ heading: OutlineHeading, in document: URL) -> some View {
+        Button {
+            focused = true
+            goTo(heading, in: document)
+        } label: {
+            HStack(spacing: 0) {
+                Text(heading.title)
+                    .font(.system(size: Layout.listSize, weight: heading.level == 1 ? .medium : .regular))
+                    .foregroundStyle(Color(heading.level <= 2 ? PaperTheme.ink : PaperTheme.secondary))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Spacer(minLength: 0)
+            }
+            .padding(.leading, rowLeading + triangle + CGFloat(max(0, heading.level - outlineTop)) * step)
+            .padding(.trailing, Layout.pad)
+            .frame(height: 24)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(heading.title)
+    }
+
+    /// The outline's top level: its highest heading, so a document of `##` headings isn't
+    /// indented by one for nothing.
+    private var outlineTop: Int { outline.map(\.level).min() ?? 1 }
+
+    /// Reads the open document's headings from its file (saved a moment after typing).
+    private func refreshOutline() {
+        guard let library = store.library, let document = openBook(in: library)?.document else {
+            if !outline.isEmpty { outline = [] }
+            return
+        }
+        let next = OutlineHeading.all(in: store.fileText(at: document.url))
+        if next != outline { outline = next }
+    }
+
+    private func goTo(_ heading: OutlineHeading, in document: URL) {
+        if store.selection != .scene(document) { store.selection = .scene(document) }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+            // The page's own text, which may be newer than the file: the same heading by order.
+            guard let page = store.margin.textView,
+                  let range = OutlineHeading.ranges(in: page.string).dropFirst(heading.id).first else { return }
+            page.window?.makeFirstResponder(page)
+            page.setSelectedRange(NSRange(location: NSMaxRange(range), length: 0))
+            page.scrollRangeToVisible(range)
+            if let line = page.lineRects(of: range).first, let clip = page.enclosingScrollView?.contentView {
+                clip.scroll(to: NSPoint(x: clip.bounds.minX, y: max(0, line.minY - 24)))
+                page.enclosingScrollView?.reflectScrolledClipView(clip)
+            }
+        }
+    }
+
+    /// A chapters-only story's chapter: one row for the chapter and its one file. Clicking it
+    /// opens the file; renaming it renames both.
+    private func chapterOnlyRow(_ chapter: Chapter, number: Int?) -> some View {
+        let scene = chapter.scenes.first
+        let tag: Selection = scene.map { .scene($0.url) } ?? .chapter(chapter.url)
+        return row(
+            leading: rowLeading + triangle,
+            number: number.map(String.init),
+            numberWidth: numberColumn,
+            title: chapter.title,
+            weight: .medium,
+            count: nil,
+            comments: scene.map { openCounts[$0.url] ?? 0 } ?? 0,
+            change: scene.flatMap { changeMarks[$0.url] },
+            words: store.wordCount(of: chapter),
+            status: statuses[chapter.url],
+            selected: store.selection == tag,
+            tag: tag,
+            disclosure: nil
+        ) {
+            Button("Rename…") { renameTarget = item(for: chapter) }
+            statusMenu(chapter.url)
+            Divider()
+            Button("Move Up") { store.move(item(for: chapter), by: -1) }
+            Button("Move Down") { store.move(item(for: chapter), by: 1) }
+            Divider()
+            Button("Show in Finder") { store.reveal(scene?.url ?? chapter.url) }
+            Button("Move to Trash", role: .destructive) { deleteTarget = item(for: chapter) }
+        }
+    }
+
     /// A tree (owner, 2026-11-13): a chapter's scenes sit one level in, starting where the
     /// chapter's title starts, their numbers left-aligned and their titles on one edge.
-    private func sceneRow(_ scene: Scene, number: String?, numberWidth: CGFloat) -> some View {
+    private func sceneRow(_ scene: Scene, number: String?, numberWidth: CGFloat, flat: Bool = false) -> some View {
         let chapterTitle = rowLeading + triangle + (number == nil ? 0 : numberColumn + numberGap)
+        // A scenes-only story's scenes start where a chapter's title would.
+        let leading = flat ? rowLeading + triangle : (number == nil ? chapterTitle + step : chapterTitle)
         return row(
-            leading: number == nil ? chapterTitle + step : chapterTitle,
+            leading: leading,
             number: number,
             numberWidth: numberWidth,
             numberAlignment: .leading,
@@ -717,12 +882,16 @@ struct SidebarView: View {
     /// New Chapter. Stories and folders are never made from inside a story.
     private var bottomBar: some View {
         let inLibrary = store.openBook == nil
+        let open = store.library.flatMap { openBook(in: $0) }
+        let shape = open?.shape ?? .chaptersAndScenes
+        let names = store.names(of: open?.url)
         return HStack(spacing: 2) {
             if inLibrary {
-                footButton("New Story", help: "New Story") { store.createBook() }
+                footButton("New Document", help: "New Document") { store.newDocumentShown = true }
             } else {
-                footButton("Scene", help: "New Scene") { store.createSceneInContext() }
-                footButton("Chapter", help: "New Chapter") { store.createChapterInContext() }
+                // What the story's shape can take: a single document takes neither.
+                if shape.hasScenes { footButton(names.scene, help: "New \(names.scene)") { store.createSceneInContext() } }
+                if shape.hasChapters { footButton(names.chapter, help: "New \(names.chapter)") { store.createChapterInContext() } }
             }
 
             Spacer(minLength: 8)
@@ -741,7 +910,7 @@ struct SidebarView: View {
                             renameFolder = folder
                         }
                     }]
-                    : [ToolbarMenuItem(title: "Back to Library", separatorAfter: true) { store.openBook = nil }])
+                    : shapeItems + [ToolbarMenuItem(title: "Back to Library", separatorAfter: true) { store.openBook = nil }])
                     + [
                         ToolbarMenuItem(title: "Show Library in Finder", separatorAfter: true) {
                             store.revealLibrary()
@@ -754,6 +923,20 @@ struct SidebarView: View {
         }
         .padding(.horizontal, Layout.pad - 6)
         .frame(height: Layout.barHeight)
+    }
+
+    /// Inside a story, the ··· menu offers to change how it is divided.
+    private var shapeItems: [ToolbarMenuItem] {
+        guard let book = store.library.flatMap({ openBook(in: $0) }) else { return [] }
+        var items: [ToolbarMenuItem] = []
+        if book.shape == .document || book.shape == .scenes {
+            items.append(ToolbarMenuItem(title: "Split into \(store.names(of: book.url).chapters)") { store.splitIntoChapters(book.url) })
+        }
+        if book.shape != .document {
+            items.append(ToolbarMenuItem(title: "Join into One Document…") { joinTarget = book })
+        }
+        if !items.isEmpty { items[items.count - 1].separatorAfter = true }
+        return items
     }
 
     private func footButton(_ title: String, help: String, action: @escaping () -> Void) -> some View {
@@ -774,21 +957,32 @@ struct SidebarView: View {
             Text("No stories yet")
                 .font(.system(size: Layout.listSize))
                 .foregroundStyle(Color(PaperTheme.secondary))
-            Button("New Story") { store.createBook() }
+            Button("New Document") { store.newDocumentShown = true }
                 .buttonStyle(SquareButtonStyle())
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
+    private var joinMessage: String {
+        guard let book = joinTarget else { return "" }
+        let scenes = book.chapters.reduce(0) { $0 + $1.scenes.count }
+        let names = store.names(of: book.url)
+        let what = book.shape == .chapters ? names.count(book.chapters.count, chapters: true) : names.count(scenes)
+        let between = "* * * marks each break between \(names.scenes.lowercased())."
+        let headings = book.shape.hasChapters ? " \(names.chapter) titles become headings, and \(between)" : " " + between.prefix(1).uppercased() + between.dropFirst()
+        return "Its \(what) become one file, in order.\(headings) Comments and notes come along, and the old files go to the Trash."
+    }
+
     private var deleteMessage: String {
         guard let target = deleteTarget else { return "" }
+        let names = store.names(for: target)
         switch target.kind {
         case .book:
-            return "The story goes to the Trash with its chapters and scenes. You can put it back from there."
+            return "The story goes to the Trash with its \(names.chapters.lowercased()) and \(names.scenes.lowercased()). You can put it back from there."
         case .chapter:
-            return "The chapter goes to the Trash with its scenes. You can put it back from there."
+            return "The \(names.chapter.lowercased()) goes to the Trash with its \(names.scenes.lowercased()). You can put it back from there."
         case .scene:
-            return "The scene goes to the Trash. You can put it back from there."
+            return "The \(names.scene.lowercased()) goes to the Trash. You can put it back from there."
         }
     }
 
@@ -1031,5 +1225,40 @@ private struct LibraryRow: View, Equatable {
         .padding(.vertical, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
         .rowBackground(selected ? Color(PaperTheme.selection) : Color.clear)
+    }
+}
+
+
+/// A Markdown heading in a single document: `#` to `######` at the start of a line.
+struct OutlineHeading: Identifiable, Equatable {
+    /// Its place among the document's headings, counting from 0.
+    let id: Int
+    let level: Int
+    let title: String
+
+    static func all(in text: String) -> [OutlineHeading] {
+        let ns = text as NSString
+        return ranges(in: text).enumerated().map { index, range in
+            let line = ns.substring(with: range)
+            let level = line.prefix { $0 == "#" }.count
+            return OutlineHeading(id: index, level: level, title: line.dropFirst(level).trimmingCharacters(in: .whitespaces))
+        }
+    }
+
+    /// Each heading line's range (without its line break), in order.
+    static func ranges(in text: String) -> [NSRange] {
+        let ns = text as NSString
+        var found: [NSRange] = []
+        var fenced = false
+        ns.enumerateSubstrings(in: NSRange(location: 0, length: ns.length), options: [.byLines, .substringNotRequired]) { _, line, _, _ in
+            let content = ns.substring(with: line)
+            if content.hasPrefix("```") { fenced.toggle(); return }
+            guard !fenced else { return }
+            let hashes = content.prefix { $0 == "#" }.count
+            guard (1...6).contains(hashes), content.dropFirst(hashes).first == " ",
+                  !content.dropFirst(hashes).trimmingCharacters(in: .whitespaces).isEmpty else { return }
+            found.append(line)
+        }
+        return found
     }
 }

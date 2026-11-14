@@ -118,20 +118,39 @@ struct SceneHeader: View {
         VStack(spacing: 0) {
             Column {
                 HStack(spacing: 6) {
+                  if book.shape == .document {
+                    // One document: its story's name, and nowhere else to go.
+                    Text(book.title)
+                        .font(.system(size: Layout.chromeSize, weight: .semibold))
+                        .foregroundStyle(Color(PaperTheme.ink))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    Spacer(minLength: 8)
+                  } else {
                     Menu {
-                        ForEach(Array(book.chapters.enumerated()), id: \.element.id) { number, chapter in
-                            Section("\(number + 1)  \(chapter.title)") {
-                                ForEach(Array(chapter.scenes.enumerated()), id: \.element.id) { place, item in
-                                    Toggle("\(number + 1).\(place + 1)  \(item.title)", isOn: Binding(
-                                        get: { item.url == scene.url },
-                                        set: { if $0 { store.selection = .scene(item.url) } }))
+                        switch book.shape {
+                        case .scenes, .chapters:
+                            // One level: the story's scenes, or its chapters (each its own file).
+                            ForEach(Array(order.enumerated()), id: \.element.id) { place, item in
+                                Toggle("\(place + 1)  \(title(of: item))", isOn: Binding(
+                                    get: { item.url == scene.url },
+                                    set: { if $0 { store.selection = .scene(item.url) } }))
+                            }
+                        default:
+                            ForEach(Array(book.chapters.enumerated()), id: \.element.id) { number, chapter in
+                                Section("\(number + 1)  \(chapter.title)") {
+                                    ForEach(Array(chapter.scenes.enumerated()), id: \.element.id) { place, item in
+                                        Toggle("\(number + 1).\(place + 1)  \(item.title)", isOn: Binding(
+                                            get: { item.url == scene.url },
+                                            set: { if $0 { store.selection = .scene(item.url) } }))
+                                    }
                                 }
                             }
                         }
                     } label: {
                         HStack(spacing: 6) {
                             if let number = store.number(ofScene: scene.url) { Badge(number) }
-                            Text(scene.title)
+                            Text(title(of: scene))
                                 .font(.system(size: Layout.chromeSize, weight: .semibold))
                                 .foregroundStyle(Color(PaperTheme.ink))
                                 .lineLimit(1)
@@ -147,14 +166,15 @@ struct SceneHeader: View {
                     // Its own width, but never wider than the header: a long title is cut
                     // with an ellipsis instead of pushing the page into the gutters.
                     .fixedSize(horizontal: false, vertical: true)
-                    .help("Go to another scene in this story")
+                    .help("Go to another \(part) in this story")
                     Spacer(minLength: 8)
                     HStack(spacing: 2) {
-                        step(.back, to: previous, help: "Previous scene")
-                        step(.caretRight, to: next, help: "Next scene")
+                        step(.back, to: previous, help: "Previous \(part)")
+                        step(.caretRight, to: next, help: "Next \(part)")
                     }
                     .opacity(hovering ? 1 : 0)
                     .animation(.easeOut(duration: 0.12), value: hovering)
+                  }
                 }
                 .padding(.horizontal, Layout.proseInset)
                 .frame(maxHeight: .infinity)
@@ -164,6 +184,20 @@ struct SceneHeader: View {
             .onHover { hovering = $0 }
             Rectangle().fill(Color(PaperTheme.hairline)).frame(height: 1)
         }
+    }
+
+    /// What one step goes to: a scene, or a chapter in a chapters-only story (a notebook's note
+    /// or folder).
+    private var part: String {
+        let names = store.names(of: book.url)
+        return (book.shape == .chapters ? names.chapter : names.scene).lowercased()
+    }
+
+    /// A chapters-only story's file is named for its chapter, but the chapter's own name is
+    /// the one shown (renaming the chapter renames both).
+    private func title(of item: Scene) -> String {
+        guard book.shape == .chapters else { return item.title }
+        return book.chapters.first { $0.scenes.contains { $0.url == item.url } }?.title ?? item.title
     }
 
     private func step(_ icon: Symbol, to target: Scene?, help: String) -> some View {
@@ -219,11 +253,11 @@ struct ChapterHeader: View {
                     .buttonStyle(.plain)
                     .menuIndicator(.hidden)
                     .fixedSize(horizontal: false, vertical: true)
-                    .help("Go to another chapter")
+                    .help("Go to another \(store.names(of: book.url).chapter.lowercased())")
                     Spacer(minLength: 8)
                     HStack(spacing: 2) {
-                        step(.back, by: -1, help: "Previous chapter")
-                        step(.caretRight, by: 1, help: "Next chapter")
+                        step(.back, by: -1, help: "Previous \(store.names(of: book.url).chapter.lowercased())")
+                        step(.caretRight, by: 1, help: "Next \(store.names(of: book.url).chapter.lowercased())")
                     }
                     .opacity(hovering ? 1 : 0)
                     .animation(.easeOut(duration: 0.12), value: hovering)
@@ -329,12 +363,12 @@ struct ChapterDocumentView: View {
             } else {
                 Column {
                     if reading {
-                        ChapterReader(title: chapter.title, number: store.shownNumber(ofChapter: chapter.url), scenes: scenes, margin: margin)
+                        ChapterReader(title: chapter.title, number: openerNumber, scenes: scenes, margin: margin)
                     } else {
                     ChapterEditor(
                         chapter: chapter.url,
                         title: chapter.title,
-                        number: store.shownNumber(ofChapter: chapter.url),
+                        number: openerNumber,
                         scenes: scenes,
                         margin: margin,
                         changes: store.versions.changes,
@@ -352,12 +386,17 @@ struct ChapterDocumentView: View {
         .onChange(of: reading) { store.saveNow(); load() }
     }
 
+    /// The names in this chapter's story (a notebook: folders and notes).
+    private var names: PartNames { store.names(of: chapter.url.deletingLastPathComponent().canonical) }
+    /// "Chapter 2" above the title; a notebook's folder has its title alone.
+    private var openerNumber: Int? { names == .notebook ? nil : store.shownNumber(ofChapter: chapter.url) }
+
     private var empty: some View {
         VStack(spacing: 10) {
-            Text("No scenes yet")
+            Text("No \(names.scenes.lowercased()) yet")
                 .font(.system(size: Layout.chromeSize))
                 .foregroundStyle(Color(PaperTheme.secondary))
-            Button("New Scene") {
+            Button("New \(names.scene)") {
                 store.selection = .chapter(chapter.url)
                 store.createSceneInContext()
             }
@@ -427,7 +466,7 @@ struct StoryPage: View {
     private func texts() -> [ReadingChapter] {
         var id = 0
         return book.chapters.map { chapter in
-            ReadingChapter(title: chapter.title, number: store.shownNumber(ofChapter: chapter.url), scenes: chapter.scenes.map { scene in
+            ReadingChapter(title: chapter.title, number: store.names(of: book.url) == .notebook ? nil : store.shownNumber(ofChapter: chapter.url), scenes: chapter.scenes.map { scene in
                 defer { id += 1 }
                 return ChapterSceneText(id: id, url: scene.url, title: scene.title, text: store.fileText(at: scene.url))
             })
@@ -464,7 +503,7 @@ struct BookOverview: View {
                         }
 
                         if book.chapters.isEmpty {
-                            Text("No chapters yet")
+                            Text("No \(store.names(of: book.url).chapters.lowercased()) yet")
                                 .font(.system(size: Layout.chromeSize))
                                 .foregroundStyle(Color(PaperTheme.secondary))
                                 .frame(maxWidth: .infinity)
@@ -625,6 +664,8 @@ struct StatusBar: View {
 private struct GitStatus: View {
     @EnvironmentObject private var store: LibraryStore
     @ObservedObject var changes: ChangeState
+    /// The page's change bars (owner, 2026-11-14: a switch here).
+    @AppStorage(PageMarks.changeBarsKey) private var changeBars = true
 
     var body: some View {
         Menu {
@@ -650,6 +691,9 @@ private struct GitStatus: View {
                 Button("New Branch…") { store.versions.sheet = .rewrite }
             }
             Button("Compare Commits…") { store.compareVersions() }
+            Divider()
+            Toggle("Show Change Bars", isOn: $changeBars)
+                .onChange(of: changeBars) { _, on in PageMarks.changeBarsOn = on }
         } label: {
             // A diff indicator, as GitHub shows one: ± and the words added and cut since the
             // last version. The rewrite's name only while you're in one.

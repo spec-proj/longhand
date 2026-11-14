@@ -161,18 +161,18 @@ struct QuickOpen: View {
         let versions = store.versions
         // Inside a story you make scenes and chapters; stories and folders are made in the
         // Library.
+        // What a story can take depends on how it is divided (a single document: neither).
         var list: [Item] = store.openBook != nil
-            ? [
-                command("New Scene", "⌘N") { store.createSceneInContext() },
-                command("New Chapter", "⇧⌘N") { store.createChapterInContext() },
-                command("Back to Library", "⌘4") { store.openBook = nil },
-            ]
+            ? (store.canAddScene ? [command("New \(store.contextNames.scene)", "⌘N") { store.createSceneInContext() }] : [])
+                + (store.canAddChapter ? [command("New \(store.contextNames.chapter)", "⇧⌘N") { store.createChapterInContext() }] : [])
+                + [command("Back to Library", "⌘4") { store.openBook = nil }]
             : [
-                command("New Story", "⌥⌘N") { store.createBook() },
+                command("New Document…", "⌥⌘N") { store.newDocumentShown = true },
                 command("New Folder") { store.createFolder() },
             ]
         list += [
             command("Switch Scene…", "⌘L") { store.switcherShown = true },
+            command("Switch Document…", "⇧⌘L") { store.documentSwitcherShown = true },
             command("Find in Library…", "⇧⌘F") { store.searchShown = true },
             command("Comment on Selection", "⌘J") { Commands.comment(margin: store.margin) },
         ]
@@ -276,9 +276,19 @@ struct QuickOpen: View {
         for book in library.books {
             place(.book(book.url), book.title, "Story")
             for chapter in book.chapters {
-                place(.chapter(chapter.url), chapter.title, book.title)
-                for scene in chapter.scenes {
-                    place(.scene(scene.url), scene.title, "\(book.title) › \(chapter.title)")
+                // By shape: a document is reached by its story; loose scenes sit under the
+                // story; a chapters-only chapter opens its one file.
+                switch book.shape {
+                case .document: continue
+                case .scenes:
+                    for scene in chapter.scenes { place(.scene(scene.url), scene.title, book.title) }
+                case .chapters:
+                    if let scene = chapter.scenes.first { place(.scene(scene.url), chapter.title, book.title) }
+                case .chaptersAndScenes:
+                    place(.chapter(chapter.url), chapter.title, book.title)
+                    for scene in chapter.scenes {
+                        place(.scene(scene.url), scene.title, "\(book.title) › \(chapter.title)")
+                    }
                 }
             }
         }

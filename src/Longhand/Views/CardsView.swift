@@ -25,7 +25,7 @@ struct ChapterCardsView: View {
                         .foregroundStyle(Color(PaperTheme.ink))
                         .lineLimit(1)
                         .padding(.trailing, 6)
-                    Badge(chapter.scenes.count == 1 ? "1 scene" : "\(chapter.scenes.count) scenes")
+                    Badge(store.names(of: chapter.url.deletingLastPathComponent().canonical).count(chapter.scenes.count))
                     Badge(Estimate.words(store.wordCount(of: chapter)))
                 }
                 .padding(.bottom, 24)
@@ -43,7 +43,7 @@ struct ChapterCardsView: View {
                 } label: {
                     HStack(spacing: 6) {
                         Symbol.add.view(size: 12)
-                        Text("New Scene")
+                        Text("New \(store.names(of: chapter.url.deletingLastPathComponent().canonical).scene)")
                     }
                     .foregroundStyle(Color(PaperTheme.ink))
                 }

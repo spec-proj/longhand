@@ -17,6 +17,7 @@ struct CheatSheet: View {
         Shortcut(label: "Command palette", keys: [.symbol("command"), .letter("K")]),
         Shortcut(label: "Library", keys: [.symbol("command"), .letter("4")]),
         Shortcut(label: "Switch scene", keys: [.symbol("command"), .letter("L")]),
+        Shortcut(label: "Switch document", keys: [.symbol("shift"), .symbol("command"), .letter("L")]),
         Shortcut(label: "Next or previous scene", keys: [.symbol("control"), .symbol("command"), .symbol("arrow.up.arrow.down")]),
         Shortcut(label: "Next or previous chapter", keys: [.symbol("option"), .symbol("command"), .symbol("arrow.up.arrow.down")]),
         Shortcut(label: "Find", keys: [.symbol("command"), .letter("F")]),

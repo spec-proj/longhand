@@ -82,6 +82,9 @@ struct ContentView: View {
                     if store.switcherShown {
                         SceneSwitcher()
                     }
+                    if store.documentSwitcherShown {
+                        SceneSwitcher(documents: true)
+                    }
                     if store.cheatSheetShown {
                         CheatSheet()
                     }
@@ -99,7 +102,7 @@ struct ContentView: View {
         .background(WindowChrome(onPointer: {
             if store.isTyping { store.isTyping = false }
         }, onEscape: {
-            guard !store.quickOpenShown, !store.switcherShown else { return false }
+            guard !store.quickOpenShown, !store.switcherShown, !store.documentSwitcherShown else { return false }
             if store.cheatSheetShown {
                 store.cheatSheetShown = false
                 return true
@@ -137,6 +140,7 @@ struct ContentView: View {
             }
         }
         .sheet(isPresented: $store.gitIntroShown) { GitIntro() }
+        .sheet(isPresented: $store.newDocumentShown) { NewDocumentSheet().environmentObject(store) }
         // The Git introduction, once, the first time a library is open (never in hidden runs).
         .onChange(of: store.library != nil, initial: true) { _, open in
             guard open, !Snapshot.isBackgroundRun, !UserDefaults.standard.bool(forKey: GitIntro.seenKey) else { return }
@@ -256,6 +260,27 @@ struct ContentView: View {
             guard let scene = store.scene(for: url), let location = store.location(ofScene: url) else {
                 return []
             }
+            let book = location.book
+            let bookSegment = PathSegment(id: 1, title: book.title, isCurrent: false,
+                                          action: { store.selection = .book(book.url) }, help: "Open \(book.title)'s page")
+            switch book.shape {
+            case .document:
+                // One document: the story is the place; clicking its name renames the story.
+                return [PathSegment(id: 1, title: book.title, isCurrent: true, action: {
+                    renameTarget = ManuscriptItem(url: book.url, title: book.title, order: book.order, kind: .book)
+                }, help: "Rename this story")]
+            case .scenes:
+                return [bookSegment, PathSegment(id: 3, title: scene.title, isCurrent: true, action: {
+                    renameTarget = ManuscriptItem(url: scene.url, title: scene.title, order: scene.order, kind: .scene)
+                }, help: "Rename this \(store.names(of: book.url).scene.lowercased())")]
+            case .chapters:
+                let chapter = location.chapter
+                return [bookSegment, PathSegment(id: 2, title: chapter.title, isCurrent: true, action: {
+                    renameTarget = ManuscriptItem(url: chapter.url, title: chapter.title, order: chapter.order, kind: .chapter)
+                }, help: "Rename this \(store.names(of: book.url).chapter.lowercased())")]
+            case .chaptersAndScenes:
+                break
+            }
             return [
                 PathSegment(
                     id: 1,
@@ -283,7 +308,7 @@ struct ContentView: View {
                             kind: .scene
                         )
                     },
-                    help: "Rename this scene"
+                    help: "Rename this \(store.names(of: location.book.url).scene.lowercased())"
                 )
             ]
 

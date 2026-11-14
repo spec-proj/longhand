@@ -350,7 +350,7 @@ struct BookInfoPage: View {
                 if isEditing {
                 SquareCheckbox(title: "Numbers", isOn: Binding(get: { !hide }, set: { on in update { $0.hideChapterNumbers = on ? nil : true } }))
                     .font(.system(size: Layout.detailSize))
-                    .help("Show chapter numbers here and in the contents")
+                    .help("Show \(store.names(of: book.url).chapter.lowercased()) numbers here and in the contents")
                 }
             }
             // Set like a printed book's contents (owner, 2026-11-13): no box or rules, the
@@ -364,7 +364,7 @@ struct BookInfoPage: View {
                     }
                 }
                 if book.chapters.isEmpty {
-                    Text("No chapters yet")
+                    Text("No \(store.names(of: book.url).chapters.lowercased()) yet")
                         .foregroundStyle(Color(PaperTheme.secondary))
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }

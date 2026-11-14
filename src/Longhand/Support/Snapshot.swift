@@ -250,6 +250,13 @@ enum Snapshot {
                 store.openBook = nil
             }
         }
+        // LONGHAND_SWITCHER=documents: the ⇧⌘L document switcher, from inside the first story.
+        if environment["LONGHAND_SWITCHER"] == "documents" {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                if let scene = store.library?.books.first?.chapters.flatMap(\.scenes).first { store.selection = .scene(scene.url) }
+                store.documentSwitcherShown = true
+            }
+        }
         // LONGHAND_SWITCHER=1: the ⌘L scene switcher, after a few scenes were visited.
         if environment["LONGHAND_SWITCHER"] == "1" {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
@@ -626,6 +633,8 @@ enum Snapshot {
                 progress.pushing = true
                 progress.offerQuitNow = kind == "quitslow"
                 content = AnyView(QuitCard(progress: progress).padding(30))
+            case "newdocument":
+                content = AnyView(NewDocumentSheet().environmentObject(store))
             case "getlibrary":
                 content = AnyView(GetLibrarySheet(preview: ["writing", "short-fiction", "the-salt-road", "notebooks"])
                     .environmentObject(store).environmentObject(store.versions))

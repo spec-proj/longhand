@@ -6,8 +6,13 @@ import AppKit
 /// of ⌘ to open the chosen one, so a quick ⌘L goes back to the scene before. ← → move too,
 /// Return opens, Esc cancels, a click opens. Opened from the menu with the mouse, it stays up
 /// until Return, a click or Esc.
+///
+/// With `documents`, Go › Switch Document (⇧⌘L): the same, for every story in the library
+/// (any shape, single documents included), the ones you were last in first, as covers on a
+/// shelf, chosen the way New Document marks a cover (owner, 2026-11-14). Opening one goes back to where you were in it.
 struct SceneSwitcher: View {
     @EnvironmentObject private var store: LibraryStore
+    var documents = false
     @State private var chosen = 0
     @State private var cards: [Card] = []
     /// ⌘ was held as it opened: letting go chooses.
@@ -15,6 +20,7 @@ struct SceneSwitcher: View {
 
     struct Card: Identifiable {
         var id: URL { url }
+        /// A scene, or a story's folder.
         let url: URL
         let title: String
         /// "2.1": the chapter's number and the scene's place in it.
@@ -22,6 +28,8 @@ struct SceneSwitcher: View {
         let chapter: String
         let synopsis: String
         let words: Int
+        /// A story's cover picture (documents only).
+        var cover: NSImage? = nil
     }
 
     var body: some View {
@@ -32,22 +40,26 @@ struct SceneSwitcher: View {
             VStack(alignment: .leading, spacing: 12) {
                 ScrollViewReader { reader in
                     ScrollView(.horizontal) {
-                        HStack(spacing: 10) {
+                        HStack(alignment: .top, spacing: documents ? Self.shelfGap : 10) {
                             ForEach(Array(cards.enumerated()), id: \.element.id) { index, card in
-                                cardView(card, selected: index == chosen)
-                                    .id(index)
-                                    .onTapGesture { chosen = index; open() }
+                                Group {
+                                    if documents { bookView(card, selected: index == chosen) } else { cardView(card, selected: index == chosen) }
+                                }
+                                .id(index)
+                                .onTapGesture { chosen = index; open() }
                             }
                         }
-                        .padding(14)
+                        .padding(documents ? Self.shelfInset : 14)
                     }
                     .scrollIndicators(.never)
+                    .background(alignment: .top) { if documents { shelf } }
                     .onChange(of: chosen) { _, index in
                         withAnimation(.easeOut(duration: 0.12)) { reader.scrollTo(index, anchor: .center) }
                     }
                 }
                 HStack(spacing: 14) {
-                    KeyHint(keys: [.symbol("command"), .letter("L")], label: "Next")
+                    KeyHint(keys: documents ? [.symbol("shift"), .symbol("command"), .letter("L")] : [.symbol("command"), .letter("L")],
+                            label: "Next")
                     KeyHint(keys: [.symbol("arrow.left"), .symbol("arrow.right")], label: "Move")
                     KeyHint(keys: [.symbol("return")], label: "Open")
                     KeyHint(keys: [.text("Esc")], label: "Cancel")
@@ -71,6 +83,44 @@ struct SceneSwitcher: View {
                 }
             }
         }
+    }
+
+    private static let shelfGap: CGFloat = 16
+    private static let coverWidth: CGFloat = 98
+    private static let shelfInset: CGFloat = 18
+    private static let shelfRoom: CGFloat = 4
+
+    /// The board the covers stand on: a hairline the panel's width, just under the covers.
+    private var shelf: some View {
+        Rectangle()
+            .fill(Color(PaperTheme.frame))
+            .frame(height: 1)
+            .padding(.top, Self.shelfInset + Self.coverWidth * 1.6 + 10 + Self.shelfRoom / 2)
+            .padding(.horizontal, Self.shelfInset)
+    }
+
+    /// A story on the shelf: its cover as the Library shows it, standing on a
+    /// hairline shelf, then its name underneath (no word count, owner 2026-11-14). Chosen as New Document marks a cover.
+    private func bookView(_ card: Card, selected: Bool) -> some View {
+        VStack(spacing: 0) {
+            // The cover the Library shows, picture or letter (owner, 2026-11-14).
+            BookCover(title: card.title, image: card.cover, width: Self.coverWidth)
+            .overlay(rounded(Layout.radius).strokeBorder(Color(selected ? PaperTheme.ink : PaperTheme.frame), lineWidth: selected ? 2 : 1))
+            .padding(5)
+            .background(rounded(Layout.radius + 2).fill(Color(selected ? PaperTheme.selection : .clear)))
+            // Room for the shelf (`shelf`), drawn once across the whole panel.
+            Color.clear.frame(height: Self.shelfRoom)
+            Text(card.title)
+                .font(.system(size: Layout.detailSize, weight: .medium))
+                .foregroundStyle(Color(selected ? PaperTheme.ink : PaperTheme.secondary))
+                .multilineTextAlignment(.center)
+                .lineLimit(2, reservesSpace: true)
+                .padding(.top, 8)
+            .frame(width: 108)
+        }
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
     private func cardView(_ card: Card, selected: Bool) -> some View {
@@ -102,6 +152,7 @@ struct SceneSwitcher: View {
     }
 
     private func load() {
+        if documents { return loadDocuments() }
         guard let library = store.library else { return }
         var all: [URL: (Scene, Chapter)] = [:]
         for book in library.books { for chapter in book.chapters { for scene in chapter.scenes { all[scene.url] = (scene, chapter) } } }
@@ -116,6 +167,27 @@ struct SceneSwitcher: View {
                         synopsis: store.margin.info(for: url).synopsis, words: store.wordCount(of: scene))
         }
         chosen = cards.count > 1 ? 1 : 0
+    }
+
+    /// Every story: the open one, then the ones whose scenes were open most recently, then
+    /// the rest in the library's order. The one before is chosen, as with scenes.
+    private func loadDocuments() {
+        guard let library = store.library else { return }
+        var order: [URL] = []
+        if let open = store.openBook { order.append(open) }
+        for scene in store.recentScenes {
+            if let book = store.location(ofScene: scene)?.book.url, !order.contains(book) { order.append(book) }
+        }
+        for book in library.books where !order.contains(book.url) { order.append(book.url) }
+        let folders = Dictionary(library.folders.map { ($0.url, $0.title) }, uniquingKeysWith: { first, _ in first })
+        cards = order.prefix(16).compactMap { url in
+            guard let book = library.books.first(where: { $0.url == url }) else { return nil }
+            let info = store.margin.info(for: url)
+            return Card(url: url, title: book.title, number: info.stage?.title ?? "",
+                        chapter: book.folder.flatMap { folders[$0] } ?? "",
+                        synopsis: info.synopsis, words: store.wordCount(of: book), cover: store.margin.cover(of: url))
+        }
+        chosen = cards.count > 1 && store.openBook != nil ? 1 : 0
     }
 
     private func move(_ step: Int) {
@@ -134,7 +206,8 @@ struct SceneSwitcher: View {
         default: break
         }
         if event.charactersIgnoringModifiers?.lowercased() == "l", flags.contains(.command) {
-            move(flags.contains(.shift) ? -1 : 1)
+            // Scenes: ⇧ goes back. Documents are ⇧⌘L already, so L always goes on.
+            move(flags.contains(.shift) && !documents ? -1 : 1)
             return true
         }
         return false
@@ -144,11 +217,11 @@ struct SceneSwitcher: View {
         guard cards.indices.contains(chosen) else { return close() }
         let url = cards[chosen].url
         close()
-        store.selection = .scene(url)
+        if documents { store.openDocument(url) } else { store.selection = .scene(url) }
     }
 
     private func close() {
-        store.switcherShown = false
+        if documents { store.documentSwitcherShown = false } else { store.switcherShown = false }
     }
 }
 

@@ -521,12 +521,12 @@ private struct NotesPane: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 18) {
                         if let sceneURL = margin.sceneURL {
-                            section(sceneTitle, kind: "Scene", first: true) {
+                            section(sceneTitle, kind: names.scene, first: true) {
                                 SceneDetails(scene: sceneURL)
                                     .id(sceneURL)
                                 label("Note")
                                 NoteField(
-                                    placeholder: "Notes on this scene",
+                                    placeholder: "Notes on this \(names.scene.lowercased())",
                                     text: margin.sceneNote,
                                     onChange: margin.setSceneNote
                                 )
@@ -534,11 +534,11 @@ private struct NotesPane: View {
                             }
                         }
                         if let chapterURL = margin.chapterURL {
-                            section(store.chapter(for: chapterURL)?.title ?? "Chapter", kind: "Chapter", first: margin.sceneURL == nil) {
+                            section(store.chapter(for: chapterURL)?.title ?? names.chapter, kind: names.chapter, first: margin.sceneURL == nil) {
                                 StatusSegments(url: chapterURL)
                                 label("Note")
                                 NoteField(
-                                    placeholder: "Notes on this chapter",
+                                    placeholder: "Notes on this \(names.chapter.lowercased())",
                                     text: margin.chapterNote,
                                     onChange: margin.setChapterNote
                                 )
@@ -581,7 +581,13 @@ private struct NotesPane: View {
     }
 
     private var sceneTitle: String {
-        margin.sceneURL.flatMap { store.scene(for: $0)?.title } ?? "Scene"
+        margin.sceneURL.flatMap { store.scene(for: $0)?.title } ?? names.scene
+    }
+
+    /// The open story's words for its parts (a notebook: folders and notes).
+    private var names: PartNames {
+        store.names(of: margin.sceneURL.flatMap { store.location(ofScene: $0)?.book.url }
+            ?? margin.chapterURL.map { $0.deletingLastPathComponent().canonical })
     }
 
     private func label(_ text: String) -> some View {

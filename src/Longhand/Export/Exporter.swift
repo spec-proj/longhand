@@ -21,8 +21,10 @@ enum Exporter {
         let chapters = book.chapters.map { chapter in
             (title: chapter.title, scenes: chapter.scenes.map { (title: $0.title, text: store.fileText(at: $0.url)) })
         }
+        // Scenes only, or one document: a single run of text, with no "Chapter 1" above it.
+        let implicit = book.chapters.contains(where: \.implicit)
         return ManuscriptBuilder.make(title: book.title, chapters: chapters, words: store.wordCount(of: book),
-                                      numbered: store.margin.info(for: book.url).hideChapterNumbers != true)
+                                      numbered: !implicit && store.margin.info(for: book.url).hideChapterNumbers != true)
     }
 
     static func export(_ book: Book, store: LibraryStore, settings: ExportSettings, to url: URL) throws {

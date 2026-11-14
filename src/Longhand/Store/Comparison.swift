@@ -95,7 +95,7 @@ extension Git {
         // those by chapter folder and title instead.
         func key(_ path: String) -> String {
             let parts = path.split(separator: "/").map(String.init)
-            guard parts.count == 3 || parts.count == 4, let last = parts.last else { return path }
+            guard (2...4).contains(parts.count), let last = parts.last else { return path }
             let base = last.lowercased().hasSuffix(".md") ? String(last.dropLast(3)) : last
             return parts.dropLast().joined(separator: "/") + "/" + FileNaming.decode(base).title
         }
@@ -144,10 +144,11 @@ extension Git {
     }
 
     /// A scene is `Book/Chapter/Scene.md`, or `Folder/Book/Chapter/Scene.md` for a book kept
-    /// in a folder; a book's `Notes` folder holds notes, not scenes.
+    /// in a folder; a scenes-only story's scene or a single document is `Book/Scene.md` (or
+    /// `Folder/Book/Scene.md`). A book's `Notes` folder holds notes, not scenes.
     static func isScene(_ path: String) -> Bool {
         let parts = path.split(separator: "/")
-        guard parts.count == 3 || parts.count == 4 else { return false }
+        guard (2...4).contains(parts.count) else { return false }
         return !parts[0].hasPrefix(".") && !parts.dropFirst().dropLast().contains("Notes")
             && parts[parts.count - 1].lowercased().hasSuffix(".md")
     }

@@ -67,13 +67,13 @@ struct LonghandApp: App {
             CommandGroup(replacing: .newItem) {
                 // Scenes and chapters are made inside a story; stories and folders in the
                 // Library.
-                Button("New Scene") { store.createSceneInContext() }
+                Button("New \(store.contextNames.scene)") { store.createSceneInContext() }
                     .keyboardShortcut("n", modifiers: .command)
-                    .disabled(store.openBook == nil)
-                Button("New Chapter") { store.createChapterInContext() }
+                    .disabled(store.openBook == nil || !store.canAddScene)
+                Button("New \(store.contextNames.chapter)") { store.createChapterInContext() }
                     .keyboardShortcut("n", modifiers: [.command, .shift])
-                    .disabled(store.openBook == nil)
-                Button("New Story") { store.createBook() }
+                    .disabled(store.openBook == nil || !store.canAddChapter)
+                Button("New Document…") { store.newDocumentShown = true }
                     .keyboardShortcut("n", modifiers: [.command, .option])
                     .disabled(store.library == nil || store.openBook != nil)
                 Button("New Folder") { store.createFolder() }
@@ -115,6 +115,9 @@ struct LonghandApp: App {
                 Button("Switch Scene…") { store.switcherShown = true }
                     .keyboardShortcut("l", modifiers: .command)
                     .disabled(store.library == nil)
+                Button("Switch Document…") { store.documentSwitcherShown = true }
+                    .keyboardShortcut("l", modifiers: [.command, .shift])
+                    .disabled(store.library?.books.isEmpty ?? true)
                 Divider()
                 Button("Previous Scene") { store.stepScene(by: -1) }
                     .keyboardShortcut(.upArrow, modifiers: [.control, .command])

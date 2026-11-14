@@ -61,6 +61,16 @@ final class CommentOverlay {
 /// margin or out to the edge of the column.
 final class HighlightTextView: NSTextView {
 
+    /// Pages draw their marks again when Clear Desk or the change bars switch changes.
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        NotificationCenter.default.removeObserver(self, name: PageMarks.changed, object: nil)
+        guard window != nil else { return }
+        NotificationCenter.default.addObserver(self, selector: #selector(marksChanged), name: PageMarks.changed, object: nil)
+    }
+
+    @objc private func marksChanged() { needsDisplay = true }
+
     /// A page on TextKit 2: each paragraph is laid out and drawn on its own, and only what is
     /// on screen is laid out, so typing near the top of a long scene and opening a long chapter
     /// no longer redraw or lay out the whole page. `LONGHAND_TK1=1` makes the old kind.
@@ -259,7 +269,7 @@ final class HighlightTextView: NSTextView {
     }
 
     override func mouseDown(with event: NSEvent) {
-        if let onChangeBarClicked, !changeBars.isEmpty {
+        if let onChangeBarClicked, !changeBars.isEmpty, PageMarks.changeBarsShown {
             let point = convert(event.locationInWindow, from: nil)
             if point.x >= barX - 8, point.x <= barX + 10 {
                 let near = NSRect(x: 0, y: point.y - 40, width: bounds.width, height: 80)
@@ -274,6 +284,8 @@ final class HighlightTextView: NSTextView {
 
     override func drawBackground(in rect: NSRect) {
         super.drawBackground(in: rect)
+        // Clear Desk: the words alone, without comment highlights or change bars.
+        guard !PageMarks.deskCleared else { return }
         for highlight in highlights {
             highlight.colour.setFill()
             for line in lineRects(of: highlight.range) {
@@ -283,8 +295,25 @@ final class HighlightTextView: NSTextView {
                 if box.intersects(rect) { NSBezierPath(rect: box).fill() }
             }
         }
-        drawChangeBars(in: rect)
+        if PageMarks.changeBarsShown { drawChangeBars(in: rect) }
     }
+}
+
+/// What the pages mark besides the words (owner, 2026-11-14): change bars can be turned off
+/// (the status bar's Changes menu, `showChangeBars`), and Clear Desk draws neither them nor
+/// comment highlights.
+@MainActor
+enum PageMarks {
+    static let changed = Notification.Name("LonghandPageMarksChanged")
+    static let changeBarsKey = "showChangeBars"
+
+    static var deskCleared = false {
+        didSet { if deskCleared != oldValue { NotificationCenter.default.post(name: changed, object: nil) } }
+    }
+    static var changeBarsOn = UserDefaults.standard.object(forKey: changeBarsKey) as? Bool ?? true {
+        didSet { if changeBarsOn != oldValue { NotificationCenter.default.post(name: changed, object: nil) } }
+    }
+    static var changeBarsShown: Bool { changeBarsOn && !deskCleared }
 }
 
 // MARK: - Breaks drawn as asterisks

@@ -1806,6 +1806,104 @@ enum SelfTest {
             store.refreshFromDisk()
         }
 
+        // MARK: Story shapes: one document, scenes only, chapters only; joining and splitting
+
+        do {
+            func newest() -> Book? { store.library?.books.max { $0.order < $1.order } }
+            func relative(_ url: URL) -> String { String(url.canonical.path.dropFirst(root.canonical.path.count + 1)) }
+
+            // One document: a folder with one file, named for the story.
+            store.createBook(title: "Signal", form: .shortStory, shape: .document)
+            let document = newest()
+            check(document?.shape == .document && document?.document != nil
+                  && document?.document?.url.deletingLastPathComponent().canonical == document?.url.canonical
+                  && document?.document?.url.lastPathComponent == "Signal.md",
+                  "shapes: a single document is one file, Signal.md, in the story's folder")
+            check(selectedSceneURL == document?.document?.url && store.openBook == document?.url,
+                  "shapes: a new document opens at its text, inside the story")
+            check(!store.canAddScene && !store.canAddChapter, "shapes: a single document takes no new scenes or chapters")
+            check(store.margin.info(for: document?.url ?? root).form == .shortStory, "shapes: the form chosen is kept")
+            store.updateText("A first line.")
+            store.saveNow()
+            check(disk(document?.document?.url) == "A first line." && store.wordCount(of: document!) == 3,
+                  "shapes: typing in a document saves and counts")
+            check(store.number(ofScene: document?.document?.url ?? root) == nil, "shapes: a document has no number")
+            if let doc = document?.document { check(Git.isScene(relative(doc.url)) && Git.scenesOnDisk(root.canonical).contains(relative(doc.url)),
+                                                   "shapes: Git counts the document as a scene") }
+
+            // Split into Chapters: one chapter per heading.
+            store.updateText("Before the first.\n\n# One\n\nFirst words.\n\n# Two\n\nSecond words.")
+            store.saveNow()
+            if let book = document { store.splitIntoChapters(book.url) }
+            let split = store.library?.books.first { $0.url == document?.url }
+            check(split?.shape == .chaptersAndScenes && split?.chapters.map(\.title) == ["Opening", "One", "Two"],
+                  "shapes: Split into Chapters cuts at headings (and keeps the opening)")
+            check(split?.chapters.dropFirst().first?.scenes.first.map { disk($0.url) } == "First words.\n",
+                  "shapes: each chapter holds its text, without the heading")
+            check(document?.document.map { !fm.fileExists(atPath: $0.url.path) } == true, "shapes: the document goes to the Trash")
+
+            // Join into One Document, with a comment carried across.
+            if let book = split, let second = book.chapters.last?.scenes.first {
+                let commentFile = root.appendingPathComponent(".longhand/comments/\(relative(second.url).dropLast(3)).json")
+                try? fm.createDirectory(at: commentFile.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try? #"{"version":1,"comments":[{"id":"3D6A2F1E-6C0B-4F8B-9E7A-1A2B3C4D5E6F","created":"2026-11-14T00:00:00Z","text":"Keep.","resolved":false,"location":7,"length":5,"quote":"words","prefix":"","suffix":""}]}"#
+                    .write(to: commentFile, atomically: true, encoding: .utf8)
+                store.joinIntoOneDocument(book.url)
+                let joined = store.library?.books.first { $0.url == book.url }
+                let text = disk(joined?.document?.url)
+                check(joined?.shape == .document && text.contains("# One\n\nFirst words.") && text.contains("# Two\n\nSecond words."),
+                      "shapes: Join into One Document puts chapters in order under their titles")
+                let comment = joined?.document.map { store.margin.readComments(for: $0.url) }?.first
+                let passage = comment.map { (text as NSString).substring(with: $0.range) }
+                check(passage == "words" && comment?.text == "Keep.", "shapes: a comment follows its passage into the joined document")
+                check(book.chapters.allSatisfy { !fm.fileExists(atPath: $0.url.path) }, "shapes: the old chapters go to the Trash")
+            }
+
+            // Scenes only: files straight in the story's folder, numbered 1, 2.
+            store.createBook(title: "Fragments", form: .notebook, shape: .scenes)
+            store.createSceneInContext()
+            let scenesOnly = newest()
+            check(scenesOnly?.shape == .scenes && scenesOnly?.looseScenes.count == 2 && scenesOnly?.chapters.count == 1,
+                  "shapes: a scenes-only story keeps its scenes straight in its folder")
+            check(store.canAddScene && !store.canAddChapter, "shapes: a scenes-only story takes scenes, not chapters")
+            check(scenesOnly?.looseScenes.last.flatMap { store.number(ofScene: $0.url) } == "2", "shapes: its scenes are numbered 1, 2")
+            if let book = scenesOnly { store.splitIntoChapters(book.url) }
+            let wrapped = store.library?.books.first { $0.url == scenesOnly?.url }
+            check(wrapped?.shape == .chaptersAndScenes && wrapped?.chapters.count == 1 && wrapped?.chapters.first?.scenes.count == 2,
+                  "shapes: Split into Chapters puts a scenes-only story's scenes in Chapter One")
+
+            // Chapters only: each chapter folder holds one file, named for it.
+            store.createBook(title: "Logbook", form: .novel, shape: .chapters)
+            store.createChapterInContext()
+            let chaptersOnly = newest()
+            check(chaptersOnly?.shape == .chapters && chaptersOnly?.chapters.count == 2
+                  && chaptersOnly?.chapters.allSatisfy { $0.scenes.count == 1 } == true,
+                  "shapes: a chapters-only story's chapters each hold one file")
+            check(!store.canAddScene && store.canAddChapter, "shapes: a chapters-only story takes chapters, not scenes")
+            if let chapter = chaptersOnly?.chapters.last {
+                store.rename(ManuscriptItem(url: chapter.url, title: chapter.title, order: chapter.order, kind: .chapter), to: "Day Two")
+                let renamed = store.library?.books.first { $0.url == chaptersOnly?.url }?.chapters.last
+                check(renamed?.title == "Day Two" && renamed?.scenes.first?.url.lastPathComponent == "Day Two.md",
+                      "shapes: renaming a chapters-only chapter renames its file too")
+            }
+            check(Git.isScene("Story/Document.md") && Git.isScene("Shelf/Story/Document.md") && !Git.isScene("Document.md"),
+                  "shapes: Git counts files straight in a story's folder as scenes")
+            check(LibraryStore.chapterParts(of: "No headings here.").map(\.title) == ["Chapter One"],
+                  "shapes: a document without headings splits into Chapter One")
+            // A notebook says folders and notes.
+            store.createBook(title: "Ideas", form: .notebook, shape: .chaptersAndScenes)
+            let notebook = newest()
+            check(store.contextNames == .notebook && notebook?.chapters.first?.title == "Folder One"
+                  && notebook?.chapters.first?.scenes.first?.title == "Untitled Note",
+                  "names: a notebook's parts are folders and notes, from its first ones on")
+            store.createSceneInContext()
+            check(newest()?.chapters.first?.scenes.last?.title == "Untitled Note" && store.names(of: document?.url) == .story,
+                  "names: a new note in a notebook is a note; other stories keep chapters and scenes")
+            let outline = OutlineHeading.all(in: "# Part\n\nText.\n\n## A scene\n```\n# not a heading\n```\n### Detail\n#nospace")
+            check(outline.map(\.title) == ["Part", "A scene", "Detail"] && outline.map(\.level) == [1, 2, 3],
+                  "shapes: a document's outline is its headings, by level (not code, not #words)")
+        }
+
         // MARK: Author profiles
 
         if let book = store.library?.books.first {
