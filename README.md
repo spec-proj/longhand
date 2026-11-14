@@ -1,4 +1,4 @@
-# Longhand
+<img width="2000" height="1273" alt="image" src="https://github.com/user-attachments/assets/ae65a8e0-2473-4084-b20a-e7fdf134269b" /># Longhand
 
 ![Longhand: Write where you are.](docs/images/readme-banner.jpg)
 
@@ -9,7 +9,7 @@ A writing app for fiction, essays and more, saved as .md files and tracked with 
 
 ## Features
 
-- **Stories, chapters and scenes.** A 'story' is a folder of documents: chapters broken up into scenes, chapters or scenes alone, or a single document.
+- **Stories, chapters and scenes.** A 'story' is a folder of documents: chapters broken up into scenes, chapters or scenes alone, or a single document. **Screenplays are also supported, using [Fountain](https://fountain.io/).**
 - **Git for writers.** Longhand is built to use Git and GitHub for tracking changes, versioning, and backing up your work, whether you do so locally or online.
 - **Simple, macOS-forward design**, mostly keyboard-operable, with a VS Code-style command palette. Hide or show any UI element, or clear everything to focus on writing.
 - **Typewriter scrolling, sentence/paragraph focus, word count targets** as well as comments and notes per scene, per chapter, and even per book. View your book or chapter in card view, rearrange your story, and switch back to read it as prose. 
@@ -21,7 +21,6 @@ _Longhand isn't notarised, so macOS asks before opening it the first time. Open 
 Contribute: [Building Longhand](CONTRIBUTING.md).
 
 ## Coming Soon
-- Screenplay formatting and export, including .fdx.
 - A boneyard for scrapped scenes.
 - Poetry/lyrics formatting.
 
