@@ -49,11 +49,11 @@ enum LibraryFolders {
 
     /// No child folder holds a scene, and a grandchild folder does.
     private static func looksLikeGroup(_ folder: URL) -> Bool {
-        let children = visible(folder).filter { $0 != "Notes" }.map { folder.appendingPathComponent($0) }.filter(isDirectory)
+        let children = visible(folder).filter { $0 != StoryFolders.notes && $0 != StoryFolders.boneyard }.map { folder.appendingPathComponent($0) }.filter(isDirectory)
         guard !children.isEmpty else { return false }
         for child in children where holdsScene(child) { return false }
         for child in children {
-            for name in visible(child) where name != "Notes" {
+            for name in visible(child) where name != StoryFolders.notes && name != StoryFolders.boneyard {
                 let grandchild = child.appendingPathComponent(name)
                 if isDirectory(grandchild), holdsScene(grandchild) { return true }
             }

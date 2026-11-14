@@ -57,6 +57,15 @@ struct ExportSheet: View {
                         SquareSegments(options: ExportSettings.Typeface.allCases, title: \.title, selection: $settings.typeface)
                     }
                 }
+                // Poems and songs (a collection): each on a page of its own, or run on.
+                if let form = margin.info(for: book.url).form, form.isVerse, book.shape != .document {
+                    GridRow {
+                        label(form == .lyrics ? "Songs" : "Poems")
+                        Toggle("Each on a new page", isOn: $settings.poemPerPage)
+                            .toggleStyle(.checkbox)
+                            .font(.system(size: Layout.chromeSize))
+                    }
+                }
             }
 
             Rectangle().fill(Color(PaperTheme.hairline)).frame(height: 1).padding(.vertical, 20)

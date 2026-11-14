@@ -86,8 +86,15 @@ its row is selected and its page shown, never its text left open beside the list
   title in semibold, "2 chapters · 175 words" beneath, a › at the right; 50pt rows. Click one
   (or Return) to go in: the book's own row at the top (no ›), then its chapters and scenes.
   Choosing a chapter or scene anywhere (palette, search, cards) goes into its book.
-- **No icons or colours to choose (owner, 2026-11-08):** a book without a cover shows a blank
-  book in the cover's shape with its title's first letter in New York (`BookPlaceholder`).
+- **A blank cover in its form's colour (owner, 2026-11-14; was plain, 2026-11-08):** a book
+  without a cover picture is a blank book in the cover's shape, its form's colour
+  (`CoverColours`: novel red, novella purple, short story yellow, poetry green, lyrics orange,
+  essay blue, screenplay white with two brass fasteners, notebook brown; no form: plain), a
+  darker spine, and on it the title and the author's byline in New York (48pt and wider; the
+  initial on anything smaller). The Library's rows show 56pt covers, a story's header 64pt
+  (owner, 2026-11-14: "larger covers"). Beside it, each detail on a line of its own: the
+  title, the stage badge, the genre, the form, the words (owner, 2026-11-14). Never the form's name on the cover. Nothing to choose: the form
+  sets it.
 - **No section headers.** Chapters are medium with a hairline (8pt clear above and below) between one chapter and the next; numbers right-aligned in tertiary, the title's weight, 7pt before it. Books are semibold; chapters carry their number in a
   tabular column; scenes are indented under the chapter's title. 13pt rows, 24pt tall.
 - **Drag to reorder** (owner, 2026-11-12: the cards could, the contents couldn't): drag a
@@ -166,16 +173,36 @@ typed.
 **Page | Cards** in the toolbar (⌘3), shown when a chapter or book is selected, as two
 segments in a hairline frame.
 
-- **A chapter as cards:** a grid of index cards (at least 200pt wide, up to four across), under
-  the chapter's title and "3 scenes · 155 words". `+ New scene` follows the last card.
-- **A book as cards:** one 240pt column per chapter (number, title, count), cards stacked.
-- **A card:** white, hairline frame (ink when selected), 6pt corners. Its number and status on top,
-  the title (15pt medium), the synopsis (13pt, up to five lines), and at the foot the word
-  count, with a thin square-ended progress rule when the scene has a target.
-- Click a card to show its details in the margin; double-click to open the scene. Drag a card
-  onto another to put it there, in the same chapter or another; drop it on the empty end of a
-  chapter to put it last. A 2px ink rule above a card marks where it will land.
-- Right-click a card for Open and the three statuses.
+Reworked 2026-11-14 (owner: fix everything the audit found, then labels, sizes, editing on the
+card, dragging chapters, dragging to the Boneyard).
+
+- **A chapter as cards:** a grid of index cards under the chapter's title and its boxes
+  ("3 scenes", "148 words"); `+ New Scene` follows the last card.
+- **A scenes-only story:** the same grid, headed by the story. **A chapters-only story:** a
+  grid with one card per chapter, numbered 1, 2, 3; dragging a card moves the whole chapter;
+  `+ New Chapter`. **A single document or a screenplay:** no Cards in the switch.
+- **A story of chapters and scenes:** one column per chapter (number, title, words), cards
+  stacked, `+ New Scene` under every column; an empty chapter keeps a dashed drop box. The
+  heading (title, chapters, words, the target's box and rule) stays put above the columns,
+  which scroll sideways. Drag a column's heading onto another to move the chapter.
+- **Sizes:** Small, Medium, Large: a three-segment switch of SF Symbols at the heading's right
+  (square.grid.3x3, square.grid.2x2, square), View › Card Size and the palette's Card Size.
+- **A card:** white, hairline frame (ink when chosen), 4pt corners. Its label's colour as a 4pt
+  band across the top; number, open comments (the contents' chat box) and status on top; the
+  title; the synopsis; at the foot the word count with a progress rule when there's a target.
+- **Labels:** Red, Orange, Yellow, Green, Blue, Purple, Grey (Label › on the card's menu); the
+  writer's own meaning.
+- Click chooses a card at once (its details in the margin, its row marked in the contents);
+  double-click or ⌘↓ opens it. Arrow keys move between cards. **Return edits the card in
+  place:** title and synopsis fields, Tab between them, Return keeps, Escape drops,
+  Option-Return a new line in the synopsis; clicking elsewhere keeps. A new card from `+ New
+  Scene` opens for its title the same way. ⌘⌫ asks, then moves the card to the Trash.
+- **Dropping:** a card dropped on another takes its place (from earlier in the same chapter it
+  lands just after it, so dropping on the next card moves one place on); a 2px ink rule shows
+  the side, beside a card in a grid, above or below in a column. The empty end of a chapter
+  puts it last. The contents' **Boneyard tab takes a dropped card** (or scene row) and cuts it.
+- Right-click a card: Open, Edit Card, Status ›, Label ›, Move To › (chapters), Move to
+  Boneyard, Show in Finder, Move to Trash.
 
 ### Book Info page (owner, 2026-11-08)
 
@@ -402,6 +429,40 @@ The format choices are remembered per library in `.longhand/export.json`. After 
 - What a scene's Markdown becomes: emphasis kept, symbols gone, a level-one heading that only
   repeats the scene's name dropped, `---` a scene break, quotes indented.
 
+## New Document (owner, 2026-11-14)
+
+Mock-up: https://claude.ai/artifact/6KQ8iA4KAemUHmExe2JTg8 (replaces the row of six covers).
+A 640pt sheet: **one cover** (168pt, on a 220 × 300 chrome well) beside **a list of forms**
+(Novel, Novella, Short Story, Poetry, Lyrics, Essay, Screenplay, Notebook), each row a small
+book in its colour and the name, 30pt tall; the chosen row on the selection band, the one under
+the pointer on chrome. The cover shows the form under the pointer, else the chosen one, with
+the name as typed (or "Untitled …") and the author.
+- **Structure** (owner's word, not "Split into"): for Short Story, Poetry, Lyrics and Essay a
+  **Collection** box first (owner: a short story or essay is one piece unless ticked; poems
+  and songs a collection unless unticked), a hairline, then the parts' boxes in the form's
+  words (Stories/Scenes, Sections/Poems, Sections/Songs, Essays/Sections, Folders/Notes,
+  Chapters/Scenes). One piece that is always one file says so instead: "Screenplay Document",
+  "Poem Document", "Song Document".
+- **Name** (↑↓ in it go through the forms), then **Author**: a pop-up of Settings › Authors,
+  None, New Author… (opens Settings there); remembers the last choice.
+- A story's page: Form's menu carries Collection for those four forms; its label names it
+  ("Short Story Collection", "Poem").
+
+## Poetry and lyrics (owner, 2026-11-14)
+
+Mock-up: https://claude.ai/artifact/De73oP9M4LVdFSrGZKubcU. Stories whose form is Poetry or
+Lyrics are verse (`BookForm.isVerse`):
+- **Write:** every line flush at the column's edge, no paragraph indent; a line too long for the
+  column hangs an em and a half under its start; a blank line between stanzas keeps its full
+  height; leading spaces are drawn as typed. A song's label, a line that is only "[Chorus]",
+  is 13pt semibold secondary with its brackets dimmed.
+- **Read:** each poem under its title (semibold, 1.15 × the text size), a small centred dot
+  between poems, stanzas a line apart, ragged right, labels without brackets.
+- **Status bar:** "9 lines" in place of words (the words in its tooltip).
+- **Export:** Word and the manuscript PDF single-spaced, wrapped lines hanging half an inch,
+  a line's space after each stanza, "N lines" on the title page; the book PDF ragged right with
+  the same hang; the e-book a block per stanza. Export › Poems (or Songs): Each on a new page.
+
 ## Screenplays (owner, 2026-11-14)
 
 Mock-up: https://claude.ai/artifact/5he383bmwa3ubvzCfKYMbt. A screenplay is a story of one
@@ -421,6 +482,26 @@ in design").
 - **Export:** PDF | Final Draft | Fountain; Paper (PDF only); Include: Title page, Scene
   numbers; Written by; Draft (the last `draft-N` tag). No line describing each format.
 - **Cheat sheet:** a Screenplay section takes Markdown's place while a screenplay is open.
+
+## Boneyard (owner, 2026-11-14)
+
+Mock-up: https://claude.ai/artifact/B1xNrBZmLp5y8DGpmCkwCD.
+- **A tab** (owner: "Boneyard should just be a tab in the left sidebar"): inside a story the
+  contents column has **Contents | Boneyard** under the story's card, square segments like
+  the margin's, the Boneyard's count in a box. The tab follows what's open (a cut scene shows
+  Boneyard). An empty Boneyard tab is just empty (owner: no line saying so). Rows in secondary
+  ink, the chosen one in ink on the selection band; at the right its old number ("1.3") or,
+  for a passage, the day it was cut. Right-click: Restore, Restore To ›, Show in Finder, Move
+  to Trash. A scene's own menu gains Move to Boneyard.
+- **Standard names** (owner: "Restore instead of Bring Back… standard obvious nomenclature").
+- **Page:** under the header, a 40pt strip on the chrome grey: "Cut from **Low Water** (scene
+  1.3) on 14 Nov", then **Restore** (primary) and **Restore To** (a menu of chapters).
+  The path reads Story › Boneyard › Scene; Boneyard is not a page to open.
+- **No status bar box** for a cut scene (owner: "lets not crowd the status bar").
+- **Single documents and screenplays:** right-click a selection › Move to Boneyard; the passage
+  is named by its first words; Restore puts it after the text it followed.
+- **Palette:** Toggle Contents / Boneyard, Move to Boneyard, Move Selection to Boneyard,
+  Restore, Restore To ›.
 
 ## Moving around (Go menu)
 
@@ -542,7 +623,7 @@ and Focus's dimming stay deliberately faint.
 ## Icons
 
 **SF Symbols** (owner, 2026-11-08), Apple's own icons, so every icon matches macOS (`Symbol`
-in `Support/Theme.swift`). A book without a cover shows its initial, not an icon. Never draw our own. Toolbar buttons are borderless, with a rounded fill on
+in `Support/Theme.swift`). A book without a cover shows its blank cover, not an icon. Never draw our own. Toolbar buttons are borderless, with a rounded fill on
 hover and while on. Disclosure chevrons are 10pt semibold in a 20pt-wide cell. The margin's
 tabs are words only, no icons (owner, 2026-11-12). Editors use the small overlay scroller.
 

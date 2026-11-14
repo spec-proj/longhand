@@ -30,6 +30,9 @@ struct SceneSwitcher: View {
         let words: Int
         /// A story's cover picture (documents only).
         var cover: NSImage? = nil
+        /// Its form, for the colour of a blank cover.
+        var form: BookForm? = nil
+        var collection: Bool? = nil
     }
 
     var body: some View {
@@ -104,7 +107,7 @@ struct SceneSwitcher: View {
     private func bookView(_ card: Card, selected: Bool) -> some View {
         VStack(spacing: 0) {
             // The cover the Library shows, picture or letter (owner, 2026-11-14).
-            BookCover(title: card.title, image: card.cover, width: Self.coverWidth)
+            BookCover(title: card.title, image: card.cover, width: Self.coverWidth, form: card.form, collection: card.collection)
             .overlay(rounded(Layout.radius).strokeBorder(Color(selected ? PaperTheme.ink : PaperTheme.frame), lineWidth: selected ? 2 : 1))
             .padding(5)
             .background(rounded(Layout.radius + 2).fill(Color(selected ? PaperTheme.selection : .clear)))
@@ -185,7 +188,7 @@ struct SceneSwitcher: View {
             let info = store.margin.info(for: url)
             return Card(url: url, title: book.title, number: info.stage?.title ?? "",
                         chapter: book.folder.flatMap { folders[$0] } ?? "",
-                        synopsis: info.synopsis, words: store.wordCount(of: book), cover: store.margin.cover(of: url))
+                        synopsis: info.synopsis, words: store.wordCount(of: book), cover: store.margin.cover(of: url), form: info.form, collection: info.collection)
         }
         chosen = cards.count > 1 && store.openBook != nil ? 1 : 0
     }

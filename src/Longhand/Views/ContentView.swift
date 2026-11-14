@@ -176,9 +176,9 @@ struct ContentView: View {
             if Snapshot.wantsChapter,
                let chapter = store.library?.books.first?.chapters.first {
                 store.selection = .chapter(chapter.url)
-            } else if Snapshot.wantsBook,
-                      let book = store.library?.books.first {
-                store.selection = .book(book.url)
+            } else if let number = Snapshot.bookNumber,
+                      let books = store.library?.books, books.indices.contains(number - 1) {
+                store.selection = .book(books[number - 1].url)
             } else if Snapshot.wantsScreenplay,
                       let book = store.library?.books.first(where: \.isScreenplay), let script = book.document {
                 store.openBook = book.url
@@ -275,6 +275,12 @@ struct ContentView: View {
             let book = location.book
             let bookSegment = PathSegment(id: 1, title: book.title, isCurrent: false,
                                           action: { store.selection = .book(book.url) }, help: "Open \(book.title)'s page")
+            // A cut scene or passage: the story, its Boneyard (a place, not a page to open),
+            // then the cut scene itself.
+            if location.chapter.boneyard {
+                return [bookSegment, PathSegment(id: 2, title: "Boneyard", isCurrent: false),
+                        PathSegment(id: 3, title: scene.title, isCurrent: true)]
+            }
             switch book.shape {
             case .document:
                 // One document: the story is the place; clicking its name renames the story.
@@ -375,9 +381,11 @@ struct ContentView: View {
                 case .scene(let url) where url.pathExtension.lowercased() == ProseFile.fountain:
                     // A screenplay: its pages, or the script to write. No cards.
                     ViewSwitch(showCards: .constant(false), first: ("Read", "Write"), isFirst: $screenplayReading, cards: false)
-                case .book where store.openBook != nil:
+                case .book(let url) where store.openBook != nil:
+                    // A single document or a screenplay has no cards.
                     ViewSwitch(showCards: $showCards, first: ("Contents", "Page"), isFirst: Binding(
-                        get: { !storyPage }, set: { storyPage = !$0 }))
+                        get: { !storyPage }, set: { storyPage = !$0 }),
+                               cards: store.book(for: url).map(BookCardsView.hasCards) ?? true)
                 default:
                     EmptyView()
                 }

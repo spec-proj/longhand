@@ -1890,6 +1890,29 @@ enum SelfTest {
                   "shapes: Git counts files straight in a story's folder as scenes")
             check(LibraryStore.chapterParts(of: "No headings here.").map(\.title) == ["Chapter One"],
                   "shapes: a document without headings splits into Chapter One")
+            // A collection of short stories: one chapter per story, called stories; its author
+            // set from the profile chosen in New Document.
+            let storyteller = AuthorProfiles.shared.add(AuthorProfile(name: "Tess Teller"))
+            store.createBook(title: "Tales", form: .shortStory, shape: .chapters, collection: true, author: storyteller)
+            let tales = newest()
+            let talesInfo = tales.map { store.margin.info(for: $0.url) }
+            check(tales?.shape == .chapters && tales?.chapters.first?.title == "Story One" && talesInfo?.collection == true
+                  && store.names(of: tales?.url).chapters == "Stories" && talesInfo?.authorName == "Tess Teller"
+                  && talesInfo?.authorProfile == storyteller.id,
+                  "new document: a short story collection has stories for chapters, and the chosen author")
+            // Poems: a collection by default (not stored), one poem when unticked.
+            store.createBook(title: "", form: .poetry, shape: .scenes)
+            let poems = newest()
+            check(poems?.title == "Untitled Collection" && poems?.looseScenes.first?.title == "Untitled Poem"
+                  && poems.map { store.margin.info(for: $0.url).collection } == .some(nil),
+                  "new document: a poetry collection holds poems, and keeps no setting for its default")
+            store.createBook(title: "", form: .poetry, shape: .document, collection: false)
+            let poem = newest()
+            check(poem?.title == "Untitled Poem" && poem?.shape == .document
+                  && poem.map { store.margin.info(for: $0.url).collection } == .some(false),
+                  "new document: a single poem is one document")
+            AuthorProfiles.shared.remove(storyteller.id)
+
             // A notebook says folders and notes.
             store.createBook(title: "Ideas", form: .notebook, shape: .chaptersAndScenes)
             let notebook = newest()
@@ -2182,7 +2205,13 @@ enum SelfTest {
                     await settle(600)
                     let back = margin.textView.map { $0.currentPlace.top } ?? -1
                     let ten = (store.text as NSString).range(of: "INT. ROOM 10 - DAY").location
-                    check(abs(back - ten) < 120, "⌘R: Write comes back at the part of the script Read was showing (\(back) for \(ten))")
+                    // At the top, perhaps with the end of the paragraph before it above.
+                    let visible = margin.textView.map { page -> Bool in
+                        guard let clip = page.enclosingScrollView?.contentView,
+                              let line = page.lineRects(of: NSRange(location: ten, length: 0)).first else { return false }
+                        return line.minY >= clip.bounds.minY - 1 && line.minY <= clip.bounds.minY + 120
+                    } ?? false
+                    check(visible && back <= ten, "⌘R: Write comes back at the part of the script Read was showing (\(back) for \(ten))")
                 }
                 store.selection = .scene(doc.url)
                 await settle(200)
@@ -2195,6 +2224,174 @@ enum SelfTest {
                 store.openOnLibrary()
                 check(store.openBook == nil && store.selection == .book(story.url),
                       "library: opening a library shows the Library, the story last open chosen")
+            }
+        }
+
+        // MARK: The Boneyard (2026-11-14)
+
+        do {
+            func newest() -> Book? { store.library?.books.max { $0.order < $1.order } }
+            store.createBook(title: "Bones", form: .novel, shape: .chaptersAndScenes)
+            store.createSceneInContext()
+            store.createSceneInContext()
+            store.createChapterInContext()
+            guard let book = newest(), book.chapters.count == 2, book.chapters[0].scenes.count == 3 else {
+                check(false, "boneyard: a story with two chapters to cut from")
+                write(lines, failures: failures, to: reportPath)
+                return finish()
+            }
+            let chapter = book.chapters[0]
+            let middle = chapter.scenes[1]
+            store.selection = .scene(middle.url)
+            await settle(300)
+            store.updateText("A scene that will be cut.")
+            store.saveNow()
+            await settle(300)   // the page takes the new text
+            if let page = margin.textView {
+                page.setSelectedRange((page.string as NSString).range(of: "will be"))
+                let made = margin.addCommentOnSelection()
+                if let made { margin.setText("Keep this?", of: made.id); margin.focused = nil }
+                margin.saveNow()
+                check(made != nil, "boneyard: a comment on the scene to cut")
+            }
+            let wordsBefore = store.wordCount(of: book)
+            store.moveToBoneyard(middle.url)
+            await settle(300)
+            let after = newest()
+            let cut = after?.boneyard?.scenes.first
+            check(cut?.url.deletingLastPathComponent().lastPathComponent == "Boneyard" && after?.chapters[0].scenes.count == 2
+                  && disk(cut?.url) == "A scene that will be cut.",
+                  "boneyard: Move to Boneyard puts the scene's file in the story's Boneyard folder, out of its chapter")
+            check(after.map { store.wordCount(of: $0) } == wordsBefore - 6, "boneyard: a cut scene's words leave the story's count")
+            check(cut.map { store.margin.info(for: $0.url).cut?.number } == "1.2" && cut.map { store.isCut($0.url) } == true
+                  && cut.map { store.number(ofScene: $0.url) } == .some(nil),
+                  "boneyard: it remembers it was 1.2, and has no number of its own")
+            check(cut.map { margin.readComments(for: $0.url).first?.text } == "Keep this?", "boneyard: its comments go with it")
+            check(selectedSceneURL == after?.chapters[0].scenes[1].url && store.contentsTab == .contents,
+                  "boneyard: the scene beside it opens in its place, on the Contents tab")
+            if let cutURL = cut?.url, let other = after?.chapters[0].scenes.first?.url {
+                store.selection = .scene(cutURL)
+                let onBoneyard = store.contentsTab == .boneyard
+                store.selection = .scene(other)
+                check(onBoneyard && store.contentsTab == .contents, "boneyard: the contents column shows the tab holding what's open")
+            }
+            if let cut, let root = store.libraryURL {
+                check(!Git.isScene(String(cut.url.canonical.path.dropFirst(root.canonical.path.count + 1))),
+                      "boneyard: Git's changes leave cut scenes out")
+                let manuscript = Exporter.manuscript(of: after!, store: store)
+                check(!manuscript.chapters.flatMap(\.blocks).contains { "\($0)".contains("will be cut") },
+                      "boneyard: a cut scene is left out of export")
+                store.restore(cut.url)
+                await settle(300)
+                let back = newest()
+                check(back?.boneyard == nil && back?.chapters[0].scenes.count == 3 && back?.chapters[0].scenes[1].title == middle.title
+                      && back.map { disk($0.chapters[0].scenes[1].url) } == "A scene that will be cut.",
+                      "boneyard: Restore puts it back where it was (1.2)")
+                if let returned = back?.chapters[0].scenes[1] {
+                    check(store.margin.info(for: returned.url).cut == nil && margin.readComments(for: returned.url).first?.text == "Keep this?"
+                          && selectedSceneURL == returned.url,
+                          "boneyard: back in its chapter it is no longer marked as cut, keeps its comments, and opens")
+                    store.moveToBoneyard(returned.url)
+                    await settle(200)
+                    if let again = newest()?.boneyard?.scenes.first, let second = newest()?.chapters[1] {
+                        store.restore(again.url, into: second.url)
+                        await settle(200)
+                        check(newest()?.chapters[1].scenes.last?.title == middle.title && newest()?.chapters[0].scenes.count == 2,
+                              "boneyard: Restore To puts it at the end of the chapter chosen")
+                    }
+                }
+            }
+
+            // A single document: a passage.
+            store.createBook(title: "Lighthouse", form: .shortStory, shape: .document)
+            guard let doc = newest(), let file = doc.document else { return finish() }
+            store.updateText("First paragraph.\n\nThe radio had been dead since October.\n\nLast paragraph.")
+            store.saveNow()
+            await settle(200)
+            let piece = store.addToBoneyard("The radio had been dead since October.", from: doc, before: "First paragraph.\n\n")
+            store.updateText("First paragraph.\n\nLast paragraph.")
+            store.saveNow()
+            check(piece?.lastPathComponent == "The radio had been dead since.md" && newest()?.boneyard?.scenes.count == 1,
+                  "boneyard: a passage cut from a document is kept there, named by its first words")
+            if let piece {
+                store.restore(piece)
+                await settle(200)
+                check(disk(file.url) == "First paragraph.\n\nThe radio had been dead since October.\n\nLast paragraph."
+                      && newest()?.boneyard == nil,
+                      "boneyard: Restore puts a passage back after the text it followed, and empties the Boneyard")
+            }
+        }
+
+        // MARK: Cards (2026-11-14)
+
+        do {
+            let a = URL(fileURLWithPath: "/a"), b = URL(fileURLWithPath: "/b"), c = URL(fileURLWithPath: "/c")
+            let other = URL(fileURLWithPath: "/x")
+            check(CardDrag.index(dropping: a, on: b, in: [a, b, c]) == 1,
+                  "cards: a card dropped on the next one moves one place on")
+            check(CardDrag.index(dropping: c, on: a, in: [a, b, c]) == 0 && CardDrag.index(dropping: c, on: b, in: [a, b, c]) == 1,
+                  "cards: a card dropped on an earlier one takes its place, before it")
+            check(CardDrag.index(dropping: other, on: b, in: [a, b, c]) == 1 && CardDrag.index(dropping: a, on: a, in: [a, b, c]) == nil,
+                  "cards: from another chapter a card lands before the one it is dropped on; on itself, nowhere")
+            check(CardDrag.neighbour(of: a, dx: 0, dy: 1, lists: [[a, b, c]], gridColumns: 2) == c
+                  && CardDrag.neighbour(of: b, dx: 1, dy: 0, lists: [[a, b, c]], gridColumns: 2) == c
+                  && CardDrag.neighbour(of: c, dx: 0, dy: 1, lists: [[a, b, c]], gridColumns: 2) == nil,
+                  "cards: arrow keys move across and down a grid")
+            check(CardDrag.neighbour(of: b, dx: 1, dy: 0, lists: [[a, b], [], [c]], gridColumns: nil) == c
+                  && CardDrag.neighbour(of: nil, dx: 1, dy: 0, lists: [[], [c]], gridColumns: nil) == c,
+                  "cards: on a story's board, across skips empty chapters; with none chosen, the first card")
+            let path = CardDrag.payload(scene: a)
+            check(CardDrag.scene(in: path) == a.canonical && CardDrag.scene(in: CardDrag.payload(chapter: a)) == nil
+                  && CardDrag.chapter(in: CardDrag.payload(chapter: a)) == a.canonical,
+                  "cards: a dragged scene and a dragged chapter are told apart (the Boneyard tab takes only scenes)")
+            check(CardSize.allCases.map(\.title) == ["Small", "Medium", "Large"] && CardSize.small.gridMin < CardSize.large.gridMin,
+                  "cards: three sizes")
+        }
+
+        do {
+            func newest() -> Book? { store.library?.books.max { $0.order < $1.order } }
+            store.createBook(title: "Docks", form: .novel, shape: .chapters)
+            store.createChapterInContext()
+            store.createChapterInContext()
+            if let book = newest(), book.shape == .chapters, book.chapters.count == 3,
+               book.chapters.allSatisfy({ $0.scenes.count == 1 }) {
+                let titles = book.chapters.map(\.title)
+                let files = book.chapters.map { $0.scenes[0].url }
+                check(store.number(ofScene: files[1]) == "2", "cards: a chapters-only story's cards are numbered 1, 2, 3")
+                check(!store.canMoveToBoneyard(files[0]), "cards: a chapters-only chapter can't be dropped on the Boneyard")
+                // Dropping the first chapter's card on the third's: it takes the third's place.
+                let urls = book.chapters.map(\.url)
+                if let index = CardDrag.index(dropping: urls[0], on: urls[2], in: urls) {
+                    store.placeChapter(urls[0], at: index)
+                }
+                let after = newest()
+                check(after?.chapters.map(\.title) == [titles[1], titles[2], titles[0]]
+                      && after?.chapters.allSatisfy({ $0.scenes.count == 1 }) == true,
+                      "cards: dropping a chapter's card moves the whole chapter, each keeping its one file")
+                if let moved = after?.chapters.last?.scenes.first {
+                    var info = margin.info(for: moved.url)
+                    info.label = .purple
+                    margin.setInfo(info, for: moved.url)
+                    margin.saveNow()
+                    let relative = String(moved.url.deletingPathExtension().path.dropFirst(store.library!.url.canonical.path.count + 1))
+                    let file = store.library!.url.appendingPathComponent(".longhand/scenes/\(relative).json")
+                    let read = (try? Data(contentsOf: file)).flatMap { try? JSONDecoder().decode(SceneInfo.self, from: $0) }
+                    check(read?.label == .purple, "cards: a card's label is kept with the scene's details")
+                    info.label = nil
+                    margin.setInfo(info, for: moved.url)
+                }
+            } else {
+                check(false, "cards: a chapters-only story with three chapters")
+            }
+
+            store.createBook(title: "Gulls", form: .shortStory, shape: .scenes)
+            if let book = newest(), let loose = book.chapters.first {
+                let before = store.selection
+                let made = store.createScene(inChapter: loose.url, open: false)
+                check(made != nil && store.selection == before && newest()?.chapters.first?.scenes.contains { $0.url == made } == true,
+                      "cards: New Scene on the cards adds a scene without leaving them")
+            } else {
+                check(false, "cards: a scenes-only story")
             }
         }
 
@@ -2450,10 +2647,77 @@ enum SelfTest {
             check(close?.title == "Close Window", "menus: ⌘W is Close Window")
             // A hidden run never puts Longhand in the owner's menu bar.
             let barItems = NSApp.windows.filter { String(describing: type(of: $0)).contains("StatusBar") && $0.frame.height > 0 }
+            check(Updates.version(of: "v0.9.5-beta") == "0.9.5" && Updates.isNewer("0.9.5", than: "0.9.4")
+                  && Updates.isNewer("0.10.0", than: "0.9.4") && Updates.isNewer("1.0", than: "0.9.9")
+                  && !Updates.isNewer("0.9.4", than: "0.9.4") && !Updates.isNewer("0.9.3", than: "0.9.4"),
+                  "updates: release tags are read and versions compared number by number")
+            let sampleRelease = #"{"tag_name":"v0.9.5-beta","html_url":"https://github.com/spec-proj/longhand/releases/tag/v0.9.5-beta","assets":[{"name":"Longhand.zip","browser_download_url":"https://github.com/spec-proj/longhand/releases/download/v0.9.5-beta/Longhand.zip"}]}"#
+            let parsed = Updates.release(from: Data(sampleRelease.utf8))
+            check(parsed?.version == "0.9.5" && parsed?.download?.lastPathComponent == "Longhand.zip" && parsed?.page.lastPathComponent == "v0.9.5-beta",
+                  "updates: GitHub's answer gives the version, its page and the zip")
+            check(Updates.shared.available == nil, "updates: a hidden run never asks GitHub")
             check(barItems.isEmpty, "menu bar: a hidden run shows no menu bar item"
                   + (barItems.isEmpty ? "" : " (\(barItems.map { "\(type(of: $0)) visible=\($0.isVisible) frame=\($0.frame)" }))"))
-            check(BookForm.allCases.map(\.title) == ["Novel", "Novella", "Short Story", "Essay", "Screenplay", "Notebook"],
-                  "story: the forms are Novel, Novella, Short Story, Essay, Screenplay, Notebook")
+            check(BookForm.allCases.map(\.title) == ["Novel", "Novella", "Short Story", "Poetry", "Lyrics", "Essay", "Screenplay", "Notebook"],
+                  "story: the forms are Novel, Novella, Short Story, Poetry, Lyrics, Essay, Screenplay, Notebook")
+            check(NewDocumentSheet.forms == BookForm.allCases, "new document: the list has every form, in order")
+            check(Set(BookForm.allCases.map { CoverColours.of($0).fill.description }).count == BookForm.allCases.count,
+                  "covers: every form has a colour of its own")
+            check(CoverColours.of(.screenplay).brads && !CoverColours.of(.novel).brads, "covers: only a screenplay has fasteners")
+            check(NewDocumentSheet.suggestedShape(for: .shortStory, collection: false) == .document
+                  && NewDocumentSheet.suggestedShape(for: .shortStory, collection: true) == .chapters
+                  && NewDocumentSheet.suggestedShape(for: .poetry, collection: true) == .scenes
+                  && NewDocumentSheet.suggestedShape(for: .poetry, collection: false) == .document
+                  && NewDocumentSheet.suggestedShape(for: .essay, collection: true) == .chapters,
+                  "new document: a collection of stories or essays has a chapter each, of poems a file each; one piece is one document")
+            check(PartNames.of(.shortStory, collection: true).chapters == "Stories" && PartNames.of(.shortStory).chapters == "Chapters"
+                  && PartNames.of(.poetry).scenes == "Poems" && PartNames.of(.lyrics).scenes == "Songs"
+                  && PartNames.of(.essay, collection: true).chapter == "Essay",
+                  "new document: a collection names its parts after its pieces")
+            check(BookForm.shortStory.title(collection: true) == "Short Story Collection" && BookForm.poetry.title(collection: false) == "Poem"
+                  && BookForm.novel.title(collection: true) == "Novel",
+                  "story: the Form menu names a collection, or one poem")
+            // Verse (owner, 2026-11-14): lines kept as written, stanzas apart, a song's labels.
+            let poemText = "# Low Water\n\nThe sea goes out\n    the way a guest leaves,\n\n[Chorus]\nWhat it *leaves*: a boot.\n"
+            let verseBook = ManuscriptBuilder.make(title: "Tide Tables", chapters: [(title: "Estuary", scenes: [
+                (title: "Low Water", text: poemText), (title: "Mudlark", text: "Knees in the silt.\n")])],
+                words: 20, verse: true, poemPerPage: true)
+            let verseBlocks = verseBook.chapters.first?.blocks ?? []
+            let stanzas = verseBlocks.compactMap { block -> [ManuscriptBook.VerseLine]? in
+                if case .stanza(let lines) = block { return lines }
+                return nil
+            }
+            check(stanzas.count == 3 && stanzas[0].count == 2 && stanzas[0][1].indent == 4
+                  && stanzas[1].first?.label == true && stanzas[1].first?.runs.first?.text == "Chorus",
+                  "verse: export keeps each line, its indent, and a song's label")
+            check(verseBlocks.first == .heading([ManuscriptBook.Run(text: "Low Water")]) && verseBlocks.contains(.pageBreak)
+                  && !verseBlocks.contains(.sceneBreak),
+                  "verse: each poem under its title, on a new page, with no scene breaks")
+            check(verseBook.lineCount == 4 && verseBook.lengthLine == "4 lines", "verse: a poetry manuscript counts lines, not words")
+            var verseNotes: [[ManuscriptBook.Run]] = []
+            let verseXML = DocxWriter.document(verseBook, ExportSettings(), notes: &verseNotes)
+            check(verseXML.contains("w:hanging=\"720\"") && verseXML.contains("<w:pageBreakBefore/>") && verseXML.contains("4 lines"),
+                  "verse: the Word file sets lines single, hanging, a poem to a page")
+            let prose = ManuscriptBuilder.blocks(from: "One line\nand the next.", sceneTitle: "X")
+            check(prose == [.paragraph([ManuscriptBook.Run(text: "One line and the next.")], opening: false)],
+                  "verse: prose still joins its lines into paragraphs")
+            check(LiveCount.verseLines(in: poemText) == 3, "verse: the status bar counts a poem's lines, not its title or labels")
+            let versePage = ChapterReader.reading(chapters: [ReadingChapter(title: "Estuary", number: 1, scenes: [
+                ChapterSceneText(id: 0, url: URL(fileURLWithPath: "/p1.md"), title: "Low Water", text: poemText),
+                ChapterSceneText(id: 1, url: URL(fileURLWithPath: "/p2.md"), title: "Mudlark", text: "Knees in the silt.\n")], verse: true)],
+                heading: nil).page.string
+            check(versePage.contains("Low Water\nThe sea goes out\n    the way a guest leaves,\nChorus\nWhat it leaves: a boot.\n·\nMudlark\nKnees")
+                  && !versePage.contains(SceneBreak.ornament),
+                  "verse: Read keeps every line, drops the label's brackets, and sets each poem under its title")
+            let verseStorage = NSTextStorage(string: "First line of a poem\nsecond line")
+            MarkdownStyler.apply(to: verseStorage, verse: true)
+            let secondStyle = verseStorage.attribute(.paragraphStyle, at: 21, effectiveRange: nil) as? NSParagraphStyle
+            check(secondStyle.map { $0.firstLineHeadIndent == Layout.hang && $0.headIndent > Layout.hang } == true,
+                  "verse: the editor gives a line no paragraph indent, and hangs a wrapped line")
+            check(NewDocumentSheet.untitled(.poetry, collection: nil) == "Untitled Collection"
+                  && NewDocumentSheet.untitled(.poetry, collection: false) == "Untitled Poem"
+                  && NewDocumentSheet.untitled(.novel, collection: nil) == "Untitled Novel",
+                  "new document: an untitled story is named for its form")
 
             // A comment's excerpt in the margin reads as the page does.
             check(CommentContext.plain("did not **understand** it[^why]. See [the card](card.md), _twice_ in snake_case") ==

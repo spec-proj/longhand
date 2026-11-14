@@ -167,13 +167,17 @@ enum LetteredCover {
         ceil(text.boundingRect(with: CGSize(width: width, height: .greatestFiniteMagnitude), options: wrap).height)
     }
 
-    /// "a novel" for a story's form; nothing for a notebook or no form.
-    static func formLine(_ form: BookForm?) -> String? {
+    /// "a novel" for a story's form ("stories" for a collection); nothing for a notebook or
+    /// no form.
+    static func formLine(_ form: BookForm?, collection: Bool? = nil) -> String? {
+        let collected = collection ?? form?.collectionByDefault ?? false
         switch form {
         case .novel: return "a novel"
         case .novella: return "a novella"
-        case .shortStory: return "a short story"
-        case .essay: return "an essay"
+        case .shortStory: return collected ? "stories" : "a short story"
+        case .poetry: return collected ? "poems" : "a poem"
+        case .lyrics: return collected ? "songs" : "a song"
+        case .essay: return collected ? "essays" : "an essay"
         case .screenplay: return "a screenplay"
         case .notebook, nil: return nil
         }

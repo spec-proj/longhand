@@ -53,7 +53,7 @@ enum DocxWriter {
     // MARK: - Document
 
     /// `notes` collects the footnotes in the order they are called out; Word numbers them.
-    private static func document(_ book: ManuscriptBook, _ settings: ExportSettings, notes: inout [[ManuscriptBook.Run]]) -> String {
+    static func document(_ book: ManuscriptBook, _ settings: ExportSettings, notes: inout [[ManuscriptBook.Run]]) -> String {
         var body = ""
         var found: [[ManuscriptBook.Run]] = []
         // A footnote's call: a raised reference to the note with that id (ids 0 and 1 are
@@ -74,7 +74,7 @@ enum DocxWriter {
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
         body += paragraph(
-            [run(settings.name), tab(), run(book.roundedWords)],
+            [run(settings.name), tab(), run(book.lengthLine)],
             properties: pPr(rightTab: textWidth, single: true, indent: 0)
         )
         for line in contact {
@@ -95,12 +95,28 @@ enum DocxWriter {
                     : pPr(indent: 0, centred: true))
             }
             body += paragraph([], properties: pPr(indent: 0))
+            // A poem that starts a new page: its title takes the break.
+            var breakNext = false
             for block in chapter.blocks {
+                let breaking = breakNext
+                breakNext = false
                 switch block {
                 case .paragraph(let runs, _):
-                    body += paragraph(runs.map { run($0) }, properties: "")
+                    body += paragraph(runs.map { run($0) }, properties: pPr(pageBreak: breaking))
                 case .heading(let runs):
-                    body += paragraph(runs.map { run($0) }, properties: pPr(indent: 0, centred: true))
+                    body += paragraph(runs.map { run($0) }, properties: pPr(pageBreak: breaking, indent: 0, centred: true))
+                case .stanza(let lines):
+                    // Single-spaced, each line as written, a wrapped line hanging half an inch
+                    // under it, a line's space after the stanza; kept together on a page.
+                    for (number, line) in lines.enumerated() {
+                        let last = number == lines.count - 1
+                        let start = line.indent * 72
+                        body += paragraph(line.runs.map { run($0) }, properties: pPr(
+                            keepNext: !last, pageBreak: breaking && number == 0, after: last ? 240 : 0, single: true,
+                            left: start + 720, hanging: 720))
+                    }
+                case .pageBreak:
+                    breakNext = true
                 case .quote(let runs):
                     body += paragraph(runs.map { run($0) }, properties: pPr(indent: 0, sides: 720))
                 case .sceneBreak:
@@ -160,19 +176,24 @@ enum DocxWriter {
     /// Paragraph properties, always in the order Word's schema requires (it may call a file
     /// damaged otherwise): page break, tabs, spacing, indent, alignment.
     private static func pPr(
-        pageBreak: Bool = false, rightTab: Int? = nil, before: Int? = nil, single: Bool = false,
-        indent: Int? = nil, sides: Int? = nil, centred: Bool = false
+        keepNext: Bool = false, pageBreak: Bool = false, rightTab: Int? = nil, before: Int? = nil, after: Int? = nil,
+        single: Bool = false, indent: Int? = nil, sides: Int? = nil, left: Int? = nil, hanging: Int? = nil, centred: Bool = false
     ) -> String {
         var xml = ""
+        if keepNext { xml += "<w:keepNext/>" }
         if pageBreak { xml += "<w:pageBreakBefore/>" }
         if let rightTab { xml += "<w:tabs><w:tab w:val=\"right\" w:pos=\"\(rightTab)\"/></w:tabs>" }
-        if before != nil || single {
+        if before != nil || after != nil || single {
             xml += "<w:spacing"
             if let before { xml += " w:before=\"\(before)\"" }
+            if let after { xml += " w:after=\"\(after)\"" }
             if single { xml += " w:line=\"240\" w:lineRule=\"auto\"" }
             xml += "/>"
         }
-        if indent != nil || sides != nil {
+        if let left, let hanging {
+            // Verse: the text starts at `left - hanging`; wrapped lines at `left`.
+            xml += "<w:ind w:left=\"\(left)\" w:hanging=\"\(hanging)\"/>"
+        } else if indent != nil || sides != nil {
             xml += "<w:ind"
             if let sides { xml += " w:left=\"\(sides)\" w:right=\"\(sides)\"" }
             if let indent { xml += " w:firstLine=\"\(indent)\"" }

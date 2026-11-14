@@ -34,6 +34,8 @@ struct ChapterEditor: NSViewRepresentable {
     var changes: ChangeState
     var places: Places
     var onEdit: (URL, String) -> Void
+    /// Poems or songs: every line kept as written.
+    var verse = false
 
     func makeCoordinator() -> Coordinator {
         Coordinator(onEdit: onEdit, margin: margin, changes: changes, places: places)
@@ -103,6 +105,7 @@ struct ChapterEditor: NSViewRepresentable {
     }
 
     func updateNSView(_ scroll: NSScrollView, context: Context) {
+        context.coordinator.verse = verse
         context.coordinator.onEdit = onEdit
         let coordinator = context.coordinator
         if coordinator.chapter != chapter {
@@ -174,6 +177,9 @@ struct ChapterEditor: NSViewRepresentable {
             guard let textView, let chapter, !loading else { return }
             places.record(textView.currentPlace, for: chapter)
         }
+
+        /// Poems or songs (`MarkdownStyler`'s verse).
+        var verse = false
 
         init(onEdit: @escaping (URL, String) -> Void, margin: MarginStore, changes: ChangeState, places: Places) {
             self.onEdit = onEdit
@@ -530,7 +536,7 @@ struct ChapterEditor: NSViewRepresentable {
             let body = NSRange(location: bodyStart, length: storage.length - bodyStart)
             let start = min(max(edited.location, body.location), storage.length)
             let end = min(max(NSMaxRange(edited), start), storage.length)
-            MarkdownStyler.restyle(storage, around: NSRange(location: start, length: end - start), within: body)
+            MarkdownStyler.restyle(storage, around: NSRange(location: start, length: end - start), within: body, verse: verse)
             styleBreaks()
             if NSMaxRange(selection) <= storage.length {
                 textView.setSelectedRange(selection)
@@ -542,7 +548,7 @@ struct ChapterEditor: NSViewRepresentable {
             guard let textView, let storage = textView.textStorage else { return }
             let selection = textView.selectedRange()
             let bodyRange = NSRange(location: bodyStart, length: storage.length - bodyStart)
-            MarkdownStyler.apply(to: storage, range: bodyRange, mode: .editor)
+            MarkdownStyler.apply(to: storage, range: bodyRange, mode: .editor, verse: verse)
             styleBreaks()
             if NSMaxRange(selection) <= storage.length {
                 textView.setSelectedRange(selection)

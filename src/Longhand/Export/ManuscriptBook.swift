@@ -81,6 +81,8 @@ struct ExportSettings: Codable, Equatable {
     var typeface: Typeface = .times
     /// The lettered cover an e-book gets when its story has no cover picture; nil for none.
     var letteredCover: LetteredCover.Style?
+    /// Poems and songs: each starts a new page.
+    var poemPerPage = true
     /// A screenplay's choices (PDF, Final Draft or Fountain; paper; title page; numbers).
     var screenplay = ScreenplayChoices()
     // The author, filled in from the book's Book Info page before exporting (`useAuthor`).
@@ -96,7 +98,7 @@ struct ExportSettings: Codable, Equatable {
     init() {}
 
     private enum CodingKeys: String, CodingKey {
-        case format, trim, paper, typeface, letteredCover, name, penName, contact, screenplay
+        case format, trim, paper, typeface, letteredCover, name, penName, contact, screenplay, poemPerPage
     }
 
     func encode(to encoder: Encoder) throws {
@@ -107,6 +109,7 @@ struct ExportSettings: Codable, Equatable {
         try c.encode(typeface, forKey: .typeface)
         try c.encodeIfPresent(letteredCover, forKey: .letteredCover)
         try c.encode(screenplay, forKey: .screenplay)
+        try c.encode(poemPerPage, forKey: .poemPerPage)
     }
 
     /// The author's details from Book Info: the contact block is the address, then phone and
@@ -127,6 +130,7 @@ struct ExportSettings: Codable, Equatable {
         trim = (try? c.decode(Trim.self, forKey: .trim)) ?? .medium
         letteredCover = try? c.decode(LetteredCover.Style.self, forKey: .letteredCover)
         screenplay = (try? c.decode(ScreenplayChoices.self, forKey: .screenplay)) ?? ScreenplayChoices()
+        poemPerPage = (try? c.decode(Bool.self, forKey: .poemPerPage)) ?? true
         name = (try? c.decode(String.self, forKey: .name)) ?? ""
         penName = (try? c.decode(String.self, forKey: .penName)) ?? ""
         contact = (try? c.decode(String.self, forKey: .contact)) ?? ""
@@ -165,6 +169,18 @@ struct ManuscriptBook {
         case sceneBreak
         /// A table: rows of cells, the first row its headings.
         case table([[[Run]]])
+        /// Verse: a stanza's lines as written (poetry and lyrics, owner 2026-11-14).
+        case stanza([VerseLine])
+        /// The next block starts a new page (a poem, when each has its own).
+        case pageBreak
+    }
+
+    /// One line of verse: its words, how far it was indented (in spaces, a tab four), and
+    /// whether it is a song's section label ("[Chorus]", shown as "Chorus").
+    struct VerseLine: Equatable {
+        var runs: [Run]
+        var indent: Int = 0
+        var label = false
     }
 
     struct Chapter {
@@ -202,6 +218,8 @@ struct ManuscriptBook {
                 case .quote(let runs): return .quote(number(runs))
                 case .sceneBreak: return .sceneBreak
                 case .table(let rows): return .table(rows.map { $0.map(number) })
+                case .stanza(let lines): return .stanza(lines.map { VerseLine(runs: number($0.runs), indent: $0.indent, label: $0.label) })
+                case .pageBreak: return .pageBreak
                 }
             }
             return (out, notes)
@@ -211,6 +229,19 @@ struct ManuscriptBook {
     let title: String
     let words: Int
     let chapters: [Chapter]
+    /// Poems or songs: lines kept as written, and counted instead of words.
+    var verse = false
+
+    /// Lines of verse, not counting labels: what a poetry manuscript gives in place of words.
+    var lineCount: Int {
+        chapters.flatMap(\.blocks).reduce(0) { total, block in
+            if case .stanza(let lines) = block { return total + lines.filter { !$0.label }.count }
+            return total
+        }
+    }
+
+    /// The figure on a manuscript's title page: "about 83,000 words", or "214 lines".
+    var lengthLine: String { verse ? (lineCount == 1 ? "1 line" : "\(lineCount.formatted(.number.locale(Locale(identifier: "en_US")))) lines") : roundedWords }
 
     /// "about 83,000 words": to the nearest thousand, or hundred for short work.
     var roundedWords: String {
@@ -225,23 +256,54 @@ struct ManuscriptBook {
 /// symbols gone, a heading that only repeats the scene's name dropped, rules become scene
 /// breaks, and consecutive scenes are separated by a scene break.
 enum ManuscriptBuilder {
-    static func make(title: String, chapters: [(title: String, scenes: [(title: String, text: String)])], words: Int, numbered: Bool = true) -> ManuscriptBook {
+    /// `verse`: poems or songs, each scene a poem under its own title (no break between
+    /// them), on a new page each when `poemPerPage`.
+    static func make(title: String, chapters: [(title: String, scenes: [(title: String, text: String)])], words: Int,
+                     numbered: Bool = true, verse: Bool = false, poemPerPage: Bool = false) -> ManuscriptBook {
         var made: [ManuscriptBook.Chapter] = []
         for (index, chapter) in chapters.enumerated() {
             var blocks: [ManuscriptBook.Block] = []
             for scene in chapter.scenes {
-                var sceneBlocks = self.blocks(from: scene.text, sceneTitle: scene.title)
+                var sceneBlocks = self.blocks(from: scene.text, sceneTitle: scene.title, verse: verse)
                 // A break typed at the very start or end of a scene would double the one
                 // between scenes.
                 while sceneBlocks.first == .sceneBreak { sceneBlocks.removeFirst() }
                 while sceneBlocks.last == .sceneBreak { sceneBlocks.removeLast() }
                 guard !sceneBlocks.isEmpty else { continue }
-                if !blocks.isEmpty { blocks.append(.sceneBreak) }
+                if verse {
+                    // Each poem under its title, unless the title only repeats the book's or
+                    // the chapter's (a single poem).
+                    if poemPerPage, !blocks.isEmpty { blocks.append(.pageBreak) }
+                    let named = scene.title.caseInsensitiveCompare(title) != .orderedSame
+                        && scene.title.caseInsensitiveCompare(chapter.title) != .orderedSame
+                    if named { blocks.append(.heading(runs(scene.title))) }
+                } else if !blocks.isEmpty {
+                    blocks.append(.sceneBreak)
+                }
                 blocks += sceneBlocks
             }
             made.append(ManuscriptBook.Chapter(number: index + 1, title: chapter.title, blocks: markOpenings(blocks), showsNumber: numbered))
         }
-        return ManuscriptBook(title: title, words: words, chapters: made)
+        return ManuscriptBook(title: title, words: words, chapters: made, verse: verse)
+    }
+
+    private static let labelPattern = try! NSRegularExpression(pattern: #"^\[([^\]\^][^\]]*)\]$"#)
+
+    /// A song's section label on a line of its own ("[Chorus]"): the words inside, else nil.
+    static func verseLabel(_ line: String) -> String? {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        let ns = trimmed as NSString
+        guard let match = labelPattern.firstMatch(in: trimmed, range: NSRange(location: 0, length: ns.length)) else { return nil }
+        return ns.substring(with: match.range(at: 1)).trimmingCharacters(in: .whitespaces)
+    }
+
+    /// A line's indent in spaces (a tab counts four).
+    static func leadingSpaces(_ line: String) -> Int {
+        var count = 0
+        for character in line {
+            if character == " " { count += 1 } else if character == "\t" { count += 4 } else { break }
+        }
+        return count
     }
 
     /// Marks the paragraphs that open a chapter or follow a heading, quote or break.
@@ -289,7 +351,7 @@ enum ManuscriptBuilder {
     private static let notePattern = try! NSRegularExpression(pattern: #"^[ ]{0,3}\[\^([^\]\s]+)\]:[ \t]*(.*)$"#)
     private static let listPattern = try! NSRegularExpression(pattern: #"^[ \t]*([-*+]|\d+\.)[ \t]+(.*)$"#)
 
-    static func blocks(from markdown: String, sceneTitle: String) -> [ManuscriptBook.Block] {
+    static func blocks(from markdown: String, sceneTitle: String, verse: Bool = false) -> [ManuscriptBook.Block] {
         let lines = markdown.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: "\n")
         var blocks: [ManuscriptBook.Block] = []
         var paragraph: [String] = []
@@ -318,6 +380,14 @@ enum ManuscriptBuilder {
         func flush() {
             defer { paragraph = [] }
             guard !paragraph.isEmpty else { return }
+            // Verse: every line as written, a stanza to a block.
+            if verse {
+                blocks.append(.stanza(paragraph.map { line in
+                    if let label = verseLabel(line) { return ManuscriptBook.VerseLine(runs: [ManuscriptBook.Run(text: label, italic: true)], label: true) }
+                    return ManuscriptBook.VerseLine(runs: runs(line.trimmingCharacters(in: .whitespaces)), indent: leadingSpaces(line))
+                }))
+                return
+            }
             // A table: lines of cells between bars, the second line all dashes.
             if paragraph.count >= 2, paragraph[0].contains("|"), matches(tableRulePattern, paragraph[1]) {
                 let rows = ([paragraph[0]] + paragraph.dropFirst(2)).map { cells($0).map { runs($0) } }
@@ -370,7 +440,8 @@ enum ManuscriptBuilder {
                 if blocks.last != .sceneBreak { blocks.append(.sceneBreak) }
                 continue
             }
-            paragraph.append(line)
+            // Verse keeps a line's own indent (its leading spaces).
+            paragraph.append(verse ? raw.replacingOccurrences(of: "\\s+$", with: "", options: .regularExpression) : line)
         }
         flush()
         return blocks

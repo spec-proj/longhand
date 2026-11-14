@@ -14,6 +14,7 @@ struct LonghandApp: App {
     @AppStorage(AppTheme.modeKey) private var appearanceMode = "system"
     @AppStorage(StatusBar.countKey) private var showCount = true
     @AppStorage("showCards") private var showCards = false
+    @AppStorage(CardSize.key) private var cardSize = CardSize.medium.rawValue
     @AppStorage(ChapterDocumentView.readingKey) private var chapterReading = true
     @AppStorage(ScreenplayReader.readingKey) private var screenplayReading = false
     @AppStorage(StoryPage.key) private var storyPage = false
@@ -71,6 +72,9 @@ struct LonghandApp: App {
         .defaultSize(width: 1320, height: 840)
         .windowToolbarStyle(.unifiedCompact)
         .commands {
+            CommandGroup(after: .appInfo) {
+                Button("Check for Updates…") { Updates.shared.check(userAsked: true) }
+            }
             CommandGroup(replacing: .newItem) {
                 // Scenes and chapters are made inside a story; stories and folders in the
                 // Library.
@@ -169,6 +173,11 @@ struct LonghandApp: App {
                     .keyboardShortcut("2", modifiers: .command)
                 Button(showCards ? "Show as Page" : "Show as Cards") { showCards.toggle() }
                     .keyboardShortcut("3", modifiers: .command)
+                Picker("Card Size", selection: $cardSize) {
+                    ForEach(CardSize.allCases) { size in
+                        Text(size.title).tag(size.rawValue)
+                    }
+                }
                 // A chapter set like the book, or the same chapter for editing; a story's
                 // contents, or the whole story to read.
                 Button(showingStory ? (storyPage ? "Show Contents" : "Read Story")

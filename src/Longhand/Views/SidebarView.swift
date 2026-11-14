@@ -23,15 +23,25 @@ struct SidebarView: View {
     /// The book the contents is inside; empty for the Library (every book). Not a setting:
     /// it follows what is open (a scene or chapter opens its book).
     @AppStorage("showCards") private var showCards = false
+    /// The card chosen on the cards (the margin's scene), copied so rows don't observe the
+    /// margin: its row is marked while the cards show.
+    @State private var cardFocus: URL?
+    /// The Boneyard tab while a card or row is dragged over it.
+    @State private var boneyardTargeted = false
 
     struct Look: Equatable {
         var stage: BookStage?
         var hideNumbers = false
         var form: BookForm?
         var genre: String?
+        var collection: Bool?
+        /// The author as a blank cover prints them (pen name, else name).
+        var byline = ""
     }
 
     @State private var collapsedChapters: Set<URL> = []
+    /// Stories whose Boneyard is open in the contents (folded away until opened).
+    @State private var openBoneyards: Set<URL> = []
     /// A single document's headings (owner, 2026-11-14): its outline, in place of chapters.
     @State private var outline: [OutlineHeading] = []
     @State private var collapsedFolders: Set<URL> = []
@@ -70,6 +80,11 @@ struct SidebarView: View {
         VStack(spacing: 0) {
             header
             Rectangle().fill(Color(PaperTheme.hairline)).frame(height: 1)
+            // Inside a story: Contents | Boneyard.
+            if let library = store.library, let book = openBook(in: library) {
+                contentsTabs(book)
+                Rectangle().fill(Color(PaperTheme.hairline)).frame(height: 1)
+            }
             // A plain stack of rows rather than a SwiftUI List: a List re-checked every row of
             // the library on each selection change (several ms on a novel); here only the
             // rows that changed redraw (`OutlineRow` compares by value).
@@ -77,7 +92,9 @@ struct SidebarView: View {
                 ScrollView {
                     LazyVStack(spacing: 0) {
                         if let library = store.library {
-                            if let book = openBook(in: library) {
+                            if let book = openBook(in: library), store.contentsTab == .boneyard {
+                                boneyardList(book)
+                            } else if let book = openBook(in: library) {
                                 // The book itself is the header above; here its chapters,
                                 // a hairline between one chapter and the next.
                                 // Scenes only: the story's scenes, numbered 1, 2, 3, with no
@@ -196,6 +213,11 @@ struct SidebarView: View {
         // rewrite you're in and a failed backup are in the status bar.)
         .background(Color(PaperTheme.well))
         .panel()
+        .onReceive(store.margin.$sceneURL) { url in
+            // Only while the cards show: switching scenes otherwise needn't redraw the contents.
+            let next = showCards ? url : nil
+            if next != cardFocus { cardFocus = next }
+        }
         .onReceive(store.margin.$openCounts) { counts in
             if counts != openCounts { openCounts = counts }
         }
@@ -210,8 +232,11 @@ struct SidebarView: View {
         }
         .onReceive(store.margin.$infos) { infos in
             var next: [URL: Look] = [:]
-            for (url, info) in infos where info.stage != nil || info.hideChapterNumbers == true || info.form != nil || !(info.genre ?? "").isEmpty {
-                next[url] = Look(stage: info.stage, hideNumbers: info.hideChapterNumbers == true, form: info.form, genre: info.genre)
+            for (url, info) in infos {
+                let byline = [info.authorPenName, info.authorName].compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .first { !$0.isEmpty } ?? ""
+                guard info.stage != nil || info.hideChapterNumbers == true || info.form != nil || !(info.genre ?? "").isEmpty || !byline.isEmpty else { continue }
+                next[url] = Look(stage: info.stage, hideNumbers: info.hideChapterNumbers == true, form: info.form, genre: info.genre, collection: info.collection, byline: byline)
             }
             if next != looks { looks = next }
             var marked: [URL: SceneInfo.Status] = [:]
@@ -562,7 +587,7 @@ struct SidebarView: View {
                 if store.selection != .book(book.url) { store.selection = .book(book.url) }
             } label: {
                 HStack(alignment: .center, spacing: 10) {
-                    BookCover(title: book.title, image: cover(of: book), width: 40)
+                    BookCover(title: book.title, image: cover(of: book), width: 64, form: looks[book.url]?.form, byline: looks[book.url]?.byline ?? "", collection: looks[book.url]?.collection)
                     VStack(alignment: .leading, spacing: 4) {
                         HStack(alignment: .firstTextBaseline, spacing: 6) {
                             Text(book.title)
@@ -572,18 +597,14 @@ struct SidebarView: View {
                                 .multilineTextAlignment(.leading)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
-                        // As on the Library's rows: the stage's badge, then "Genre / Form".
-                        let kind = [look?.genre, look?.form?.title].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " / ")
-                        if look?.stage != nil || !kind.isEmpty {
-                            HStack(spacing: 6) {
-                                if let stage = look?.stage { StageBadge(stage: stage) }
-                                if !kind.isEmpty {
-                                    Text(kind)
-                                        .font(.system(size: Layout.detailSize, weight: .medium))
-                                        .foregroundStyle(Color(PaperTheme.secondary))
-                                        .lineLimit(1)
-                                }
-                            }
+                        // As on the Library's rows: the stage's badge, the genre, the form, each
+                        // on a line of its own.
+                        if let stage = look?.stage { StageBadge(stage: stage) }
+                        ForEach([look?.genre, look?.form?.title].compactMap { $0 }.filter { !$0.isEmpty }, id: \.self) { detail in
+                            Text(detail)
+                                .font(.system(size: Layout.detailSize, weight: .medium))
+                                .foregroundStyle(Color(PaperTheme.secondary))
+                                .lineLimit(1)
                         }
                         if let target, target > 0 {
                             // Pages for a screenplay, words for anything else.
@@ -830,13 +851,13 @@ struct SidebarView: View {
             comments: scene.map { openCounts[$0.url] ?? 0 } ?? 0,
             change: scene.flatMap { changeMarks[$0.url] },
             words: store.wordCount(of: chapter),
-            status: statuses[chapter.url],
-            selected: store.selection == tag,
+            status: statuses[scene?.url ?? chapter.url],
+            selected: store.selection == tag || scene.map { onCards($0.url) } == true,
             tag: tag,
             disclosure: nil
         ) {
             Button("Rename…") { renameTarget = item(for: chapter) }
-            statusMenu(chapter.url)
+            statusMenu(scene?.url ?? chapter.url)
             Divider()
             Button("Move Up") { store.move(item(for: chapter), by: -1) }
             Button("Move Down") { store.move(item(for: chapter), by: 1) }
@@ -864,7 +885,7 @@ struct SidebarView: View {
             change: changeMarks[scene.url],
             words: store.wordCount(of: scene),
             status: statuses[scene.url],
-            selected: store.selection == .scene(scene.url),
+            selected: store.selection == .scene(scene.url) || onCards(scene.url),
             tag: .scene(scene.url),
             disclosure: nil
         ) {
@@ -873,6 +894,114 @@ struct SidebarView: View {
             Divider()
             Button("Move Up") { store.move(item(for: scene), by: -1) }
             Button("Move Down") { store.move(item(for: scene), by: 1) }
+            Divider()
+            if store.canMoveToBoneyard(scene.url) {
+                Button("Move to Boneyard") { store.moveToBoneyard(scene.url) }
+            }
+            Button("Show in Finder") { store.reveal(scene.url) }
+            Button("Move to Trash", role: .destructive) { deleteTarget = item(for: scene) }
+        }
+    }
+
+    /// Contents | Boneyard, across the top of the column inside a story, as the margin's tabs
+    /// are across its own: square segments, the chosen one pressed in, the Boneyard's count in
+    /// a box.
+    private func contentsTabs(_ book: Book) -> some View {
+        HStack(spacing: 0) {
+            contentsTab(.contents, title: "Contents", count: nil)
+            Rectangle().fill(Color(PaperTheme.hairline)).frame(width: 1)
+            contentsTab(.boneyard, title: "Boneyard", count: book.boneyard?.scenes.count)
+        }
+        .frame(height: Layout.headerHeight)
+    }
+
+    /// Whether a scene's card is the one chosen on the cards now showing.
+    private func onCards(_ url: URL) -> Bool {
+        guard showCards, cardFocus == url else { return false }
+        switch store.selection {
+        case .chapter, .book: return true
+        default: return false
+        }
+    }
+
+    private func contentsTab(_ tab: LibraryStore.ContentsTab, title: String, count: Int?) -> some View {
+        let selected = store.contentsTab == tab || (tab == .boneyard && boneyardTargeted)
+        return Button {
+            store.contentsTab = tab
+        } label: {
+            HStack(spacing: 5) {
+                Text(title)
+                    .fontWeight(selected ? .semibold : .medium)
+                    .foregroundStyle(Color(selected ? PaperTheme.ink : PaperTheme.secondary))
+                if let count, count > 0 { Badge("\(count)") }
+            }
+            .font(.system(size: Layout.chromeSize))
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(selected ? Color(PaperTheme.controlOn) : .clear)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(tab == .boneyard ? "Scenes and passages cut from this story: not in the manuscript, counts or export. Drop a card or scene here to cut it." : "The story's chapters and scenes")
+        // A card or a scene's row dropped on the Boneyard tab is cut.
+        .dropDestination(for: String.self) { payloads, _ in
+            guard tab == .boneyard, let payload = payloads.first, let url = CardDrag.scene(in: payload),
+                  store.canMoveToBoneyard(url) else { return false }
+            store.moveToBoneyard(url)
+            return true
+        } isTargeted: { over in
+            if tab == .boneyard { boneyardTargeted = over }
+        }
+    }
+
+    /// The Boneyard tab: each cut scene with where it was ("1.3") or, for a passage, the day
+    /// it was cut. Click to open one; right-click to restore it. Empty when nothing is cut
+    /// (owner: no line saying so).
+    @ViewBuilder
+    private func boneyardList(_ book: Book) -> some View {
+        ForEach(book.boneyard?.scenes ?? []) { scene in
+            boneyardRow(scene, in: book)
+        }
+    }
+
+    private func boneyardRow(_ scene: Scene, in book: Book) -> some View {
+        let selected = store.selection == .scene(scene.url)
+        let cut = store.margin.info(for: scene.url).cut
+        let detail = cut?.number ?? cut.map { $0.date.formatted(.dateTime.day().month(.abbreviated)) }
+        return Button {
+            focused = true
+            if !selected { store.selection = .scene(scene.url) }
+        } label: {
+            HStack(spacing: 8) {
+                Text(scene.title)
+                    .font(.system(size: Layout.listSize, weight: selected ? .medium : .regular))
+                    .foregroundStyle(Color(selected ? PaperTheme.ink : PaperTheme.secondary))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Spacer(minLength: 8)
+                if let detail {
+                    Text(detail)
+                        .font(.system(size: Layout.detailSize, weight: .medium).monospacedDigit())
+                        .foregroundStyle(Color(PaperTheme.tertiary))
+                        .fixedSize()
+                }
+            }
+            .padding(.leading, Layout.pad)
+            .padding(.trailing, Layout.pad)
+            .frame(height: 24)
+            .rowBackground(Color(selected ? PaperTheme.selection : .clear))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(cut.map { "Cut from \($0.from)" } ?? scene.title)
+        .contextMenu {
+            Button("Restore") { store.restore(scene.url) }
+            if book.document == nil, book.shape == .chaptersAndScenes, !book.chapters.isEmpty {
+                Menu("Restore To") {
+                    ForEach(Array(book.chapters.enumerated()), id: \.element.id) { index, chapter in
+                        Button("\(index + 1)  \(chapter.title)") { store.restore(scene.url, into: chapter.url) }
+                    }
+                }
+            }
             Divider()
             Button("Show in Finder") { store.reveal(scene.url) }
             Button("Move to Trash", role: .destructive) { deleteTarget = item(for: scene) }
@@ -1196,9 +1325,9 @@ private struct LibraryRow: View, Equatable {
     let cover: NSImage?
     var enter: () -> Void = {}
 
-    /// "Fantasy / Novel": the genre, then the form, whichever are set (owner, 2026-11-13).
-    private var kind: String {
-        [look.genre, look.form?.title].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " / ")
+    /// The genre, then the form, whichever are set: one line each.
+    private var details: [String] {
+        [look.genre, look.form?.title].compactMap { $0 }.filter { !$0.isEmpty }
     }
 
     static func == (a: LibraryRow, b: LibraryRow) -> Bool {
@@ -1206,28 +1335,25 @@ private struct LibraryRow: View, Equatable {
     }
 
     /// The Library's own row, larger than the rows inside a book: the cover (or its initial),
-    /// then three lines of text (owner, 2026-11-12): the title, its stage badge with its genre
-    /// and form ("Writing  Fantasy / Novel"), and its words. No icons for genres.
+    /// then a line for each detail (owner, 2026-11-14): the title, its stage badge, genre, form,
+    /// and its words. No icons for genres.
     var body: some View {
         HStack(spacing: 12) {
-            BookCover(title: title, image: cover, width: 36)
+            BookCover(title: title, image: cover, width: 56, form: look.form, byline: look.byline, collection: look.collection)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
                     .font(.system(size: Layout.listSize, weight: .semibold))
                     .foregroundStyle(Color(PaperTheme.ink))
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
-                // The stage's badge, then the genre and form.
-                if look.stage != nil || !kind.isEmpty {
-                    HStack(spacing: 6) {
-                        if let stage = look.stage { StageBadge(stage: stage) }
-                        if !kind.isEmpty {
-                            Text(kind)
-                                .font(.system(size: Layout.detailSize, weight: .medium))
-                                .foregroundStyle(Color(PaperTheme.secondary))
-                                .lineLimit(1)
-                        }
-                    }
+                // Each detail on a line of its own (owner, 2026-11-14): the stage's badge, the
+                // genre, the form, then the words.
+                if let stage = look.stage { StageBadge(stage: stage).padding(.vertical, 1) }
+                ForEach(details, id: \.self) { detail in
+                    Text(detail)
+                        .font(.system(size: Layout.detailSize, weight: .medium))
+                        .foregroundStyle(Color(PaperTheme.secondary))
+                        .lineLimit(1)
                 }
                 Text(pages.map { $0 == 1 ? "1 page" : "\($0.formatted()) pages" } ?? (words == 1 ? "1 word" : "\(words.formatted()) words"))
                     .font(.system(size: Layout.detailSize, weight: .medium).monospacedDigit())

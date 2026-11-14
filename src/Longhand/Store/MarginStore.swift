@@ -74,6 +74,26 @@ struct SceneInfo: Codable, Equatable {
     var hiddenFacts: [StoryFact]?
     /// How the story is divided (chapters and scenes, chapters, scenes, one document).
     var shape: BookShape?
+    /// A collection (short stories, poems, essays, songs) rather than one piece; nil is the
+    /// form's default (`BookForm.collectionByDefault`).
+    var collection: Bool?
+    /// A scene or passage in the boneyard: where it was cut from, so it can go back.
+    var cut: Cut?
+    /// A colour on the scene's index card (the writer's own meaning: a POV, a thread).
+    var label: CardLabel?
+
+    struct Cut: Codable, Equatable {
+        /// The chapter it was in (or, for a passage, the document), by title.
+        var from: String
+        /// Its number then ("1.3"), if it had one.
+        var number: String?
+        /// The chapter's folder name, and its place in that chapter.
+        var chapter: String?
+        var index: Int?
+        var date: Date
+        /// A passage: the text just before it, to find its place again.
+        var before: String?
+    }
 
     func shows(_ fact: StoryFact) -> Bool { !(hiddenFacts ?? []).contains(fact) }
 
@@ -93,7 +113,7 @@ struct SceneInfo: Codable, Equatable {
         synopsis.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && status == nil && target == nil
             && stage == nil && form == nil
             && [genre, authorName, authorPenName, authorAddress, authorEmail, authorPhone, previousWorks].allSatisfy { ($0 ?? "").isEmpty }
-            && hideChapterNumbers != true && (hiddenFacts ?? []).isEmpty && shape == nil
+            && hideChapterNumbers != true && (hiddenFacts ?? []).isEmpty && shape == nil && cut == nil && collection == nil && label == nil
     }
 
     init(synopsis: String = "", status: Status? = nil, target: Int? = nil) {
@@ -121,7 +141,10 @@ struct SceneInfo: Codable, Equatable {
         previousWorks = try? container.decodeIfPresent(String.self, forKey: .previousWorks)
         hideChapterNumbers = try? container.decodeIfPresent(Bool.self, forKey: .hideChapterNumbers)
         hiddenFacts = try? container.decodeIfPresent([StoryFact].self, forKey: .hiddenFacts)
+        label = try? container.decodeIfPresent(CardLabel.self, forKey: .label)
         shape = try? container.decodeIfPresent(BookShape.self, forKey: .shape)
+        collection = try? container.decodeIfPresent(Bool.self, forKey: .collection)
+        cut = try? container.decodeIfPresent(Cut.self, forKey: .cut)
     }
 }
 
@@ -169,16 +192,37 @@ enum BookStage: String, Codable, CaseIterable, Identifiable {
 /// essays, screenplays (2026-11-14) and notebooks. Stored by name, so the order can change
 /// without touching saved stories.
 enum BookForm: String, Codable, CaseIterable, Identifiable {
-    case novel, novella, shortStory, essay, screenplay, notebook
+    case novel, novella, shortStory, poetry, lyrics, essay, screenplay, notebook
     var id: String { rawValue }
     var title: String {
         switch self {
         case .novel: return "Novel"
         case .novella: return "Novella"
         case .shortStory: return "Short Story"
+        case .poetry: return "Poetry"
+        case .lyrics: return "Lyrics"
         case .essay: return "Essay"
         case .screenplay: return "Screenplay"
         case .notebook: return "Notebook"
+        }
+    }
+
+    /// Forms that can be one piece or a collection of them (owner, 2026-11-14): short stories
+    /// and essays are one piece unless ticked; poems and songs a collection unless unticked.
+    var collects: Bool { [.shortStory, .poetry, .lyrics, .essay].contains(self) }
+    var collectionByDefault: Bool { self == .poetry || self == .lyrics }
+    /// Poems and songs: every line kept as written, on the page and in export.
+    var isVerse: Bool { self == .poetry || self == .lyrics }
+
+    /// The form's name as one piece or several: "Short Story Collection", "Poem".
+    func title(collection: Bool?) -> String {
+        guard collects else { return title }
+        let collected = collection ?? collectionByDefault
+        switch self {
+        case .shortStory, .essay: return collected ? "\(title) Collection" : title
+        case .poetry: return collected ? "Poetry" : "Poem"
+        case .lyrics: return collected ? "Lyrics" : "Song"
+        default: return title
         }
     }
 }

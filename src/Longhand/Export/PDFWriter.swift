@@ -64,6 +64,22 @@ enum PDFWriter {
                 case .heading(let runs): body.append(text(runs, style(indent: 0, align: .center)))
                 case .quote(let runs): body.append(text(runs, style(indent: 0, sides: 36)))
                 case .sceneBreak: body.append(text(plain("#"), style(indent: 0, align: .center)))
+                case .stanza(let lines):
+                    // Poetry manuscripts are single-spaced: each line as written, a wrapped
+                    // line hanging under it, a blank line after the stanza.
+                    for (number, line) in lines.enumerated() {
+                        let s = NSMutableParagraphStyle()
+                        s.minimumLineHeight = 14
+                        s.maximumLineHeight = 14
+                        let indent = CGFloat(line.indent) * 3.6
+                        s.firstLineHeadIndent = indent
+                        s.headIndent = indent + 36
+                        s.paragraphSpacing = number == lines.count - 1 ? 14 : 0
+                        body.append(text(line.runs, s))
+                    }
+                case .pageBreak:
+                    // A form feed: the layout starts the next page here.
+                    body.append(NSAttributedString(string: "\u{0C}", attributes: [.font: font]))
                 case .table(let rows):
                     // A ruled table across the text width: each cell its own block.
                     let table = NSTextTable()
@@ -110,7 +126,7 @@ enum PDFWriter {
                 let left = style(indent: 0, line: 14)
                 let name = NSAttributedString(string: settings.name, attributes: [.font: font, .foregroundColor: ink, .paragraphStyle: left])
                 name.draw(in: CGRect(x: margin, y: margin, width: width, height: 20))
-                NSAttributedString(string: book.roundedWords, attributes: [.font: font, .foregroundColor: ink, .paragraphStyle: style(indent: 0, align: .right, line: 14)])
+                NSAttributedString(string: book.lengthLine, attributes: [.font: font, .foregroundColor: ink, .paragraphStyle: style(indent: 0, align: .right, line: 14)])
                     .draw(in: CGRect(x: margin, y: margin, width: width, height: 20))
                 var y = margin + 14
                 for line in settings.contact.components(separatedBy: .newlines) where !line.trimmingCharacters(in: .whitespaces).isEmpty {

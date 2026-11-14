@@ -9,6 +9,7 @@ struct SettingsView: View {
     @AppStorage(ProseFace.defaultsKey) private var proseFace = ProseFace.sfPro.rawValue
     @AppStorage(ProseSize.defaultsKey) private var proseSize = 0
     @AppStorage(MenuBarItem.key) private var showMenuBarItem = true
+    @AppStorage(Updates.key) private var checkForUpdates = true
     @AppStorage(WritingModes.focusKey) private var focus = false
     @AppStorage(WritingModes.unitKey) private var focusUnit = WritingModes.Unit.sentence.rawValue
     @AppStorage(WritingModes.typewriterKey) private var typewriter = false
@@ -52,7 +53,12 @@ struct SettingsView: View {
 
             section("Menu bar") {
                 SquareCheckbox(title: "Show Longhand in the menu bar", isOn: $showMenuBarItem)
-                    .help("Git status, Commit and Push, and the window, from the Mac’s menu bar")
+                    .help("A click shows or hides the window; right-click for Git status, Commit and Push")
+            }
+
+            section("Updates") {
+                SquareCheckbox(title: "Check for new versions", isOn: $checkForUpdates)
+                    .help("Once a day Longhand asks GitHub for its latest release, and says in the status bar if there is a newer one. Nothing is downloaded by itself.")
             }
             }
 
@@ -150,7 +156,34 @@ private struct AuthorSettings: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 6) {
-                if authors.all.count > 1 {
+                // Side by side while they fit; from four on, a pop-up (owner, 2026-11-14:
+                // more ran off the window).
+                if authors.all.count > 3 {
+                    Menu {
+                        ForEach(authors.all) { profile in
+                            Toggle(profile.title, isOn: Binding(get: { profile.id == current?.id }, set: { if $0 { choose(profile.id) } }))
+                        }
+                    } label: {
+                        HStack(spacing: 6) {
+                            Text(current?.title ?? "")
+                                .foregroundStyle(Color(PaperTheme.ink))
+                                .lineLimit(1)
+                            Spacer(minLength: 6)
+                            Image(systemName: "chevron.up.chevron.down")
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(Color(PaperTheme.secondary))
+                        }
+                        .font(.system(size: Layout.chromeSize))
+                        .padding(.horizontal, 8)
+                        .frame(width: 240, height: 26)
+                        .background(Color(PaperTheme.paper), in: rounded())
+                        .overlay(rounded().strokeBorder(Color(PaperTheme.controlBorder), lineWidth: 1))
+                        .contentShape(Rectangle())
+                    }
+                    .menuStyle(.button)
+                    .buttonStyle(.plain)
+                    .fixedSize()
+                } else if authors.all.count > 1 {
                     Segments(options: authors.all.map { ($0.id, $0.title) },
                              value: Binding(get: { current?.id ?? "" }, set: { choose($0) }))
                 }

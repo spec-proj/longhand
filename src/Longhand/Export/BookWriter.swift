@@ -138,6 +138,19 @@ enum BookWriter {
                     body.append(text(runs, style(first: 0, align: .center, before: leading, after: leading / 2), font: italic))
                 case .quote(let runs):
                     body.append(text(runs, style(first: 0, before: leading / 2, after: leading / 2, sides: size * 1.5)))
+                case .stanza(let lines):
+                    // Verse: ragged right, every line as written, a wrapped line hanging an em
+                    // and a half under it, a line's space after the stanza.
+                    for (number, line) in lines.enumerated() {
+                        let indent = CGFloat(line.indent) * size * 0.3
+                        let s = style(first: 0, align: .left, after: number == lines.count - 1 ? leading : 0).mutableCopy() as! NSMutableParagraphStyle
+                        s.firstLineHeadIndent = indent
+                        s.headIndent = indent + size * 1.5
+                        body.append(text(line.runs, s))
+                    }
+                case .pageBreak:
+                    // A form feed: the layout starts the next page here.
+                    body.append(NSAttributedString(string: "\u{0C}", attributes: [.font: roman]))
                 case .sceneBreak:
                     // Three spaced asterisks, as printed books set a break (owner,
                     // 2026-11-12). Half a line above and below: with its own line that

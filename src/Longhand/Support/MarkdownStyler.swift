@@ -95,6 +95,8 @@ enum MarkdownStyler {
     private static let bullet = try! NSRegularExpression(pattern: #"^[ \t]*([-*+])[ \t]+"#)
     private static let numbered = try! NSRegularExpression(pattern: #"^[ \t]*(\d+\.)[ \t]+"#)
     private static let rule = try! NSRegularExpression(pattern: #"^[ \t]*([-*_])(?:[ \t]*\1){2,}[ \t]*$"#)
+    /// A song's section label on a line of its own: "[Chorus]" (not a footnote's "[^1]").
+    private static let verseLabel = try! NSRegularExpression(pattern: #"^[ \t]*(\[)([^\]\^][^\]]*)(\])[ \t]*$"#)
 
     // Emphasis hugs its words, as Markdown has it: "2 * 3 * 4" and a bullet's own star are not
     // italics, and an underscore inside a word (a_file_name) is just an underscore.
@@ -110,22 +112,22 @@ enum MarkdownStyler {
 
     /// Styles `range` of the storage (all of it by default), leaving the rest untouched — the
     /// chapter page keeps its opener outside the styled range.
-    static func apply(to storage: NSTextStorage, range: NSRange? = nil, mode: Mode = .editor) {
-        apply(to: storage, range: range, mode: mode, previous: .none)
+    static func apply(to storage: NSTextStorage, range: NSRange? = nil, mode: Mode = .editor, verse: Bool = false) {
+        apply(to: storage, range: range, mode: mode, previous: .none, verse: verse)
     }
 
     /// Sets the whole storage for reading and says which characters of the text it was given
     /// were removed (the Markdown symbols), so places in the original can be found on the page.
     /// `extra` are further characters to take out with the symbols (a table's bars, a
     /// footnote call's brackets); the result includes them.
-    static func applyReader(to storage: NSTextStorage, removing extra: IndexSet = []) -> IndexSet {
-        apply(to: storage, range: nil, mode: .reader, previous: .none, removing: extra)
+    static func applyReader(to storage: NSTextStorage, removing extra: IndexSet = [], verse: Bool = false) -> IndexSet {
+        apply(to: storage, range: nil, mode: .reader, previous: .none, verse: verse, removing: extra)
     }
 
     /// Restyles only what an edit can have changed: the edited lines, and the next line with
     /// text (whose indent depends on the line before it). `edited` is the changed range after
     /// the edit; `bounds` limits styling (the chapter page leaves its opener alone).
-    static func restyle(_ storage: NSTextStorage, around edited: NSRange, within bounds: NSRange? = nil) {
+    static func restyle(_ storage: NSTextStorage, around edited: NSRange, within bounds: NSRange? = nil, verse: Bool = false) {
         let string = storage.string as NSString
         let limit = bounds ?? NSRange(location: 0, length: string.length)
         guard limit.length > 0, NSMaxRange(limit) <= string.length else { return }
@@ -154,7 +156,7 @@ enum MarkdownStyler {
             }
             probe = max(line.location, limit.location)
         }
-        apply(to: storage, range: NSRange(location: start, length: end - start), mode: .editor, previous: previous)
+        apply(to: storage, range: NSRange(location: start, length: end - start), mode: .editor, previous: previous, verse: verse)
     }
 
     private static func isBlank(_ line: NSRange, in string: NSString) -> Bool {
@@ -180,7 +182,7 @@ enum MarkdownStyler {
 
     @discardableResult
     private static func apply(to storage: NSTextStorage, range: NSRange?, mode: Mode, previous: LineKind,
-                              removing extra: IndexSet = []) -> IndexSet {
+                              verse: Bool = false, removing extra: IndexSet = []) -> IndexSet {
         let string = storage.string as NSString
         let full = range ?? NSRange(location: 0, length: string.length)
         guard full.length > 0, NSMaxRange(full) <= string.length else { return [] }
@@ -188,7 +190,7 @@ enum MarkdownStyler {
         var markers: [NSRange] = []
         storage.beginEditing()
         storage.setAttributes(baseAttributes, range: full)
-        styleBlocks(in: string, range: full, storage: storage, mode: mode, previous: previous, markers: &markers)
+        styleBlocks(in: string, range: full, storage: storage, mode: mode, previous: previous, verse: verse, markers: &markers)
         styleInline(in: string, range: full, storage: storage, markers: &markers)
         var removed = mode == .reader ? extra : IndexSet()
         if mode == .reader {
@@ -212,6 +214,7 @@ enum MarkdownStyler {
         storage: NSTextStorage,
         mode: Mode,
         previous start: LineKind,
+        verse: Bool,
         markers: inout [NSRange]
     ) {
         var location = range.location
@@ -234,9 +237,10 @@ enum MarkdownStyler {
                     storage: storage,
                     mode: mode,
                     previous: previous,
+                    verse: verse,
                     markers: &markers
                 )
-            } else if lineRange.length > 0, mode == .editor {
+            } else if lineRange.length > 0, mode == .editor, !verse {
                 storage.addAttribute(.paragraphStyle, value: current.blank, range: lineRange)
                 storage.addAttribute(.font, value: current.blankFont, range: lineRange)
             }
@@ -255,6 +259,7 @@ enum MarkdownStyler {
         storage: NSTextStorage,
         mode: Mode,
         previous: LineKind,
+        verse: Bool = false,
         markers: inout [NSRange]
     ) -> LineKind {
         let line = string.substring(with: range)
@@ -320,6 +325,26 @@ enum MarkdownStyler {
             // Part of the page (it is drawn as asterisks), not a dimmed symbol.
             storage.addAttribute(.foregroundColor, value: PaperTheme.secondary, range: range)
             return .rule
+        }
+
+        if verse {
+            // Verse (owner, 2026-11-14): every line as written, flush left, never justified; a
+            // line too long for the page hangs an em and a half under its start. A blank line
+            // between stanzas keeps its full height.
+            let style = paragraph(first: Layout.hang, head: Layout.hang + em * 1.5, lineHeight: leading)
+            storage.addAttribute(.paragraphStyle, value: style, range: paragraphRange)
+            // A song's section label ("[Chorus]"): small and grey, its brackets dimmed (gone
+            // when reading).
+            if let match = verseLabel.firstMatch(in: line, range: lineLength) {
+                storage.addAttribute(.font, value: NSFont.systemFont(ofSize: Layout.chromeSize, weight: .semibold), range: range)
+                storage.addAttribute(.foregroundColor, value: PaperTheme.secondary, range: range)
+                for bracket in [match.range(at: 1), match.range(at: 3)] {
+                    let symbol = NSRange(location: range.location + bracket.location, length: bracket.length)
+                    dim(symbol, in: storage)
+                    markers.append(symbol)
+                }
+            }
+            return .body
         }
 
         if let match = bullet.firstMatch(in: line, range: lineLength)

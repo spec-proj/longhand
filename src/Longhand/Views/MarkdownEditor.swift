@@ -23,8 +23,13 @@ struct MarkdownEditor: NSViewRepresentable {
     var onChange: (String, Int) -> Void
     /// A Fountain screenplay (`ScreenplayStyler`, `ScreenplayKeys`) rather than Markdown.
     var screenplay = false
+    /// Poems or songs: every line kept as written (`MarkdownStyler`'s verse).
+    var verse = false
     /// Where the status bar's counts (and a screenplay's element) live.
     var live: LiveCount? = nil
+    /// A single document: moves a selected passage (and the text before it) to the Boneyard;
+    /// true when it did, and the page then takes the passage out.
+    var cutPassage: ((String, String) -> Bool)? = nil
 
     func makeCoordinator() -> Coordinator {
         Coordinator(self)
@@ -184,6 +189,29 @@ struct MarkdownEditor: NSViewRepresentable {
             return selector == #selector(NSResponder.insertNewline(_:)) && MarkdownFormat.continueBlock(in: textView)
         }
 
+        /// Right-click in a single document: Move to Boneyard for the selected passage.
+        func textView(_ view: NSTextView, menu: NSMenu, for event: NSEvent, at charIndex: Int) -> NSMenu? {
+            guard parent.cutPassage != nil, view.selectedRange().length > 0 else { return menu }
+            let item = NSMenuItem(title: "Move to Boneyard", action: #selector(moveSelectionToBoneyard), keyEquivalent: "")
+            item.target = self
+            menu.insertItem(.separator(), at: 0)
+            menu.insertItem(item, at: 0)
+            return menu
+        }
+
+        @objc func moveSelectionToBoneyard() {
+            guard let textView, let cut = parent.cutPassage else { return }
+            let range = textView.selectedRange()
+            guard range.length > 0 else { return }
+            let string = textView.string as NSString
+            let passage = string.substring(with: range)
+            let start = max(0, range.location - 80)
+            let before = string.substring(with: NSRange(location: start, length: range.location - start))
+            guard cut(passage, before) else { return }
+            // Out of the page as an edit, so it saves like typing.
+            textView.insertText("", replacementRange: range)
+        }
+
         /// A line Tab began as a character's name: what's typed on it is set in capitals.
         private var capsLine: Int?
 
@@ -275,7 +303,7 @@ struct MarkdownEditor: NSViewRepresentable {
             // "--" stays two hyphens in a script; smart quotes are fine.
             textView.isAutomaticDashSubstitutionEnabled = !parent.screenplay
             if let storage = textView.textStorage {
-                if parent.screenplay { ScreenplayStyler.apply(to: storage) } else { MarkdownStyler.apply(to: storage) }
+                if parent.screenplay { ScreenplayStyler.apply(to: storage) } else { MarkdownStyler.apply(to: storage, verse: parent.verse) }
             }
             textView.typingAttributes = parent.screenplay ? ScreenplayStyler.baseAttributes : MarkdownStyler.baseAttributes
             reportElement()
@@ -405,7 +433,7 @@ struct MarkdownEditor: NSViewRepresentable {
             if parent.screenplay {
                 ScreenplayStyler.restyle(storage, around: around)
             } else {
-                MarkdownStyler.restyle(storage, around: around)
+                MarkdownStyler.restyle(storage, around: around, verse: parent.verse)
             }
             if selection.location <= storage.length {
                 textView.setSelectedRange(NSRange(

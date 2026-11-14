@@ -169,8 +169,11 @@ struct QuickOpen: View {
             : [
                 command("New Document…", "⌥⌘N") { store.newDocumentShown = true },
                 command("New Folder") { store.createFolder() },
-                command("Import Final Draft…") { store.importFinalDraft() },
             ]
+        list += [
+            command("Import Final Draft…") { store.importFinalDraft() },
+            command("Check for Updates…") { Updates.shared.check(userAsked: true) },
+        ]
         list += [
             command("Switch Scene…", "⌘L") { store.switcherShown = true },
             command("Switch Document…", "⇧⌘L") { store.documentSwitcherShown = true },
@@ -188,6 +191,28 @@ struct QuickOpen: View {
                 defaults.set(false, forKey: "showCards")
                 defaults.set(!page, forKey: StoryPage.key)
             })
+        }
+        // The Boneyard.
+        if let library = store.library, let open = store.openBook, let book = library.books.first(where: { $0.url == open }) {
+            list.append(command("Toggle Contents / Boneyard") {
+                store.contentsTab = store.contentsTab == .boneyard ? .contents : .boneyard
+            })
+            if case .scene(let url) = store.selection, store.canMoveToBoneyard(url) {
+                list.append(command("Move to Boneyard") { store.moveToBoneyard(url) })
+            }
+            // A single document: the passage selected on the page.
+            if case .scene(let url) = store.selection, book.document?.url == url,
+               let page = store.margin.page as? MarkdownEditor.Coordinator, (page.pageTextView?.selectedRange().length ?? 0) > 0 {
+                list.append(command("Move Selection to Boneyard") { page.moveSelectionToBoneyard() })
+            }
+            if case .scene(let url) = store.selection, store.isCut(url) {
+                list.append(command("Restore") { store.restore(url) })
+                if book.document == nil, book.shape == .chaptersAndScenes, !book.chapters.isEmpty {
+                    list.append(group("Restore To", book.chapters.enumerated().map { index, chapter in
+                        command("\(index + 1)  \(chapter.title)") { store.restore(url, into: chapter.url) }
+                    }))
+                }
+            }
         }
         if case .scene(let url) = store.selection, url.pathExtension.lowercased() == ProseFile.fountain {
             let reading = defaults.bool(forKey: ScreenplayReader.readingKey)
@@ -212,6 +237,12 @@ struct QuickOpen: View {
             command("Toggle Word Count") {
                 defaults.set(!(defaults.object(forKey: StatusBar.countKey) as? Bool ?? true), forKey: StatusBar.countKey)
             },
+            group("Card Size", CardSize.allCases.map { size in
+                Item(id: "cardsize:" + size.rawValue, title: size.title, detail: "", command: true,
+                     current: (defaults.string(forKey: CardSize.key) ?? CardSize.medium.rawValue) == size.rawValue) {
+                    defaults.set(size.rawValue, forKey: CardSize.key)
+                }
+            }),
             group("Text Size", [
                 command("Bigger", "⌘+") { ProseSize.step(1) },
                 command("Smaller", "⌘−") { ProseSize.step(-1) },

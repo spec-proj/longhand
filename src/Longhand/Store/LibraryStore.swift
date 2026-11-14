@@ -15,6 +15,16 @@ final class LibraryStore: ObservableObject {
             selectionChanged(from: oldValue)
             places.opened(selection)
             enterBook(of: selection)
+            // The contents column shows the tab that holds what's open.
+            switch selection {
+            case .scene(let url):
+                let tab: ContentsTab = isCut(url) ? .boneyard : .contents
+                if contentsTab != tab { contentsTab = tab }
+            case .chapter:
+                if contentsTab != .contents { contentsTab = .contents }
+            default:
+                break
+            }
         }
     }
 
@@ -398,7 +408,7 @@ final class LibraryStore: ObservableObject {
         versions.scheduleChanges()
         versions.filesChanged()
         margin.refreshCounts(
-            scenes: scanned.library.books.flatMap(\.chapters).flatMap(\.scenes).map(\.url),
+            scenes: scanned.library.books.flatMap { $0.chapters + ($0.boneyard.map { [$0] } ?? []) }.flatMap(\.scenes).map(\.url),
             books: scanned.library.books.map(\.url) + scanned.library.books.flatMap(\.chapters).map(\.url)
         )
 
@@ -456,7 +466,8 @@ final class LibraryStore: ObservableObject {
             var chapters: [Chapter] = []
             // `Notes` holds the book's notes, not a chapter.
             for rawChapterURL in chapterURLs
-            where isDirectory(rawChapterURL) && rawChapterURL.lastPathComponent != "Notes" {
+            where isDirectory(rawChapterURL) && rawChapterURL.lastPathComponent != "Notes"
+                && rawChapterURL.lastPathComponent != Self.boneyardFolder {
                 let chapterURL = rawChapterURL.canonical
                 let chapterName = FileNaming.decode(chapterURL.lastPathComponent)
 
@@ -514,7 +525,25 @@ final class LibraryStore: ObservableObject {
             } else {
                 shape = stored == .chapters ? .chapters : .chaptersAndScenes
             }
-            return Book(url: bookURL, title: bookName.title, order: bookName.order, chapters: chapters, folder: folder, shape: shape)
+            // The Boneyard: cut scenes and passages, kept apart from the chapters.
+            var boneyard: Chapter?
+            let boneyardURL = bookURL.appendingPathComponent(Self.boneyardFolder, isDirectory: true)
+            if isDirectory(boneyardURL) {
+                var cut: [Scene] = []
+                for raw in (try? fm.contentsOfDirectory(at: boneyardURL, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])) ?? []
+                where ProseFile.isProse(raw) && !isDirectory(raw) {
+                    let url = raw.canonical
+                    let name = FileNaming.decode(url.deletingPathExtension().lastPathComponent)
+                    counts[url] = Self.wordCount(read(url))
+                    cut.append(Scene(url: url, title: name.title, order: name.order))
+                }
+                if !cut.isEmpty {
+                    cut.sort(by: ordered)
+                    boneyard = Chapter(url: boneyardURL.canonical, title: "Boneyard", order: 0, scenes: cut, boneyard: true)
+                }
+            }
+            return Book(url: bookURL, title: bookName.title, order: bookName.order, chapters: chapters, folder: folder, shape: shape,
+                        boneyard: boneyard)
         }
 
         for rawURL in bookURLs where isDirectory(rawURL) {
@@ -641,6 +670,9 @@ final class LibraryStore: ObservableObject {
     private func setText(_ newText: String) {
         text = newText
         textVersion += 1
+        // Lines are counted only for poems and songs (it costs a pass over the text per key).
+        live.countsLines = activeSceneURL.flatMap { location(ofScene: $0) }
+            .map { margin.info(for: $0.book.url).form?.isVerse == true } ?? false
         live.update(newText)
     }
 
@@ -783,12 +815,13 @@ final class LibraryStore: ObservableObject {
     @Published var newDocumentShown = false
 
     /// A new story of the chosen form, divided as chosen, opened at its first page of text.
-    func createBook(title rawTitle: String = "", form: BookForm? = nil, shape: BookShape = .chaptersAndScenes) {
+    func createBook(title rawTitle: String = "", form: BookForm? = nil, shape: BookShape = .chaptersAndScenes,
+                    collection: Bool? = nil, author: AuthorProfile? = nil) {
         guard let root = libraryURL else { return }
         let books = library?.books ?? []
         let order = (books.map(\.order).max() ?? 0) + 1
         let trimmed = rawTitle.trimmingCharacters(in: .whitespacesAndNewlines)
-        let title = trimmed.isEmpty ? "Untitled \(form?.title ?? "Story")" : trimmed
+        let title = trimmed.isEmpty ? NewDocumentSheet.untitled(form, collection: collection) : trimmed
         let bookURL = FileNaming.unique(root.appendingPathComponent(
             FileNaming.name(order: order, title: title)
         )).canonical
@@ -796,7 +829,7 @@ final class LibraryStore: ObservableObject {
         do {
             try FileManager.default.createDirectory(at: bookURL, withIntermediateDirectories: true)
             let sceneURL: URL
-            let names = PartNames.of(form)
+            let names = PartNames.of(form, collection: collection)
             let firstChapter = "\(names.chapter) One"
             switch shape {
             case .chaptersAndScenes:
@@ -814,6 +847,9 @@ final class LibraryStore: ObservableObject {
             var info = margin.info(for: bookURL)
             info.form = form
             info.shape = shape == .chaptersAndScenes ? nil : shape
+            // Stored only when it differs from the form's own default.
+            if let form, form.collects, let collection, collection != form.collectionByDefault { info.collection = collection }
+            if let author { info.setAuthor(author) }
             margin.setInfo(info, for: bookURL)
             reload(select: .none)
             openBook = bookURL
@@ -918,7 +954,7 @@ final class LibraryStore: ObservableObject {
 
     /// What a story calls its parts (a notebook: folders and notes).
     func names(of bookURL: URL?) -> PartNames {
-        bookURL.map { PartNames.of(margin.info(for: $0).form) } ?? .story
+        bookURL.map { let info = margin.info(for: $0); return PartNames.of(info.form, collection: info.collection) } ?? .story
     }
 
     /// The names in the story in hand (the menus' New Scene and New Chapter).
@@ -940,7 +976,15 @@ final class LibraryStore: ObservableObject {
 
     func createChapterInContext() {
         // Chapters are made inside a story; a new story is made in the Library.
-        guard let book = contextBook, book.shape.hasChapters else { return }
+        guard let book = contextBook else { return }
+        createChapter(in: book.url)
+    }
+
+    /// A new chapter at the end of a story. Opened unless `open` is false (the cards: the new
+    /// card is edited in place). Returns its first file.
+    @discardableResult
+    func createChapter(in bookURL: URL, open: Bool = true) -> URL? {
+        guard let book = book(for: bookURL), book.shape.hasChapters else { return nil }
         do {
             let order = (book.chapters.map(\.order).max() ?? 0) + 1
             let names = self.names(of: book.url)
@@ -950,9 +994,11 @@ final class LibraryStore: ObservableObject {
                 ? try createSceneFile(in: chapterURL, title: "Untitled \(names.chapter)", order: nil)
                 : try createSceneFile(in: chapterURL, title: "Untitled \(names.scene)", order: 1)
             reload(select: .none)
-            selection = .scene(sceneURL)
+            if open { selection = .scene(sceneURL) }
+            return sceneURL
         } catch {
             errorMessage = "Couldn’t create a chapter."
+            return nil
         }
     }
 
@@ -974,16 +1020,27 @@ final class LibraryStore: ObservableObject {
         }
     }
 
-    private func createScene(in chapter: Chapter) {
+    /// A new scene at the end of a chapter (the cards' New Scene). Opened unless `open` is
+    /// false. Returns its file.
+    @discardableResult
+    func createScene(inChapter chapterURL: URL, open: Bool = true) -> URL? {
+        guard let chapter = chapter(for: chapterURL) else { return nil }
+        return createScene(in: chapter, open: open)
+    }
+
+    @discardableResult
+    private func createScene(in chapter: Chapter, open: Bool = true) -> URL? {
         do {
             let order = (chapter.scenes.map(\.order).max() ?? 0) + 1
             // In the story's words: a chapter's folder is the story's, or (loose scenes) the story itself.
             let story = chapter.implicit ? chapter.url : chapter.url.deletingLastPathComponent().canonical
             let url = try createSceneFile(in: chapter.url, title: "Untitled \(names(of: story).scene)", order: order)
             reload(select: .none)
-            selection = .scene(url)
+            if open { selection = .scene(url) }
+            return url
         } catch {
             errorMessage = "Couldn’t create a scene."
+            return nil
         }
     }
 
@@ -1090,9 +1147,9 @@ final class LibraryStore: ObservableObject {
     /// itself), moving it between chapters if need be, and renumbers both chapters so the
     /// filename prefixes stay 01, 02, 03… Used by dragging cards.
     func placeScene(_ sceneURL: URL, inChapter chapterURL: URL, at index: Int) {
-        guard let source = library?.books.flatMap(\.chapters).first(where: { $0.scenes.contains { $0.url == sceneURL } }),
-              let target = chapter(for: chapterURL),
-              let moving = scene(for: sceneURL) else { return }
+        // From a chapter, or (Restore) from the Boneyard, which has no numbers to keep.
+        let source = library?.books.flatMap(\.chapters).first(where: { $0.scenes.contains { $0.url == sceneURL } })
+        guard let target = chapter(for: chapterURL), let moving = scene(for: sceneURL) else { return }
         saveNow()
 
         var targetScenes = target.scenes.filter { $0.url != sceneURL }
@@ -1100,7 +1157,7 @@ final class LibraryStore: ObservableObject {
         var plans: [(scene: Scene, folder: URL, order: Int)] = targetScenes.enumerated().map {
             ($0.element, target.url, $0.offset + 1)
         }
-        if source.url != target.url {
+        if let source, source.url != target.url {
             plans += source.scenes.filter { $0.url != sceneURL }.enumerated().map {
                 ($0.element, source.url, $0.offset + 1)
             }
@@ -1140,6 +1197,134 @@ final class LibraryStore: ObservableObject {
             }
             follow(moves)
             errorMessage = "Couldn’t move that scene."
+        }
+    }
+
+    // MARK: - The Boneyard
+
+    /// The contents column's two tabs inside a story (owner, 2026-11-14: "Boneyard should
+    /// just be a tab in the left sidebar").
+    enum ContentsTab { case contents, boneyard }
+    @Published var contentsTab: ContentsTab = .contents
+
+    /// Each story's folder of cut scenes and passages (owner, 2026-11-14; mock-up
+    /// https://claude.ai/artifact/B1xNrBZmLp5y8DGpmCkwCD). Plain files, like its Notes.
+    static let boneyardFolder = StoryFolders.boneyard
+
+    /// A scene that can be cut: one in a chapter of a story with scenes.
+    func canMoveToBoneyard(_ url: URL) -> Bool {
+        guard let (book, chapter) = location(ofScene: url) else { return false }
+        return !chapter.boneyard && book.shape.hasScenes
+    }
+
+    /// Moves a scene into its story's Boneyard: out of the manuscript, counts and export, its
+    /// comments, notes and details with it, and where it was remembered for Restore. If it
+    /// was open, the scene beside it opens instead.
+    func moveToBoneyard(_ sceneURL: URL) {
+        guard canMoveToBoneyard(sceneURL), let (book, chapter) = location(ofScene: sceneURL),
+              let index = chapter.scenes.firstIndex(where: { $0.url == sceneURL }) else { return }
+        saveNow()
+        let scene = chapter.scenes[index]
+        let number = self.number(ofScene: sceneURL)
+        let neighbour = chapter.scenes[safe: index + 1] ?? (index > 0 ? chapter.scenes[index - 1] : nil)
+        let wasOpen = selection == .scene(sceneURL)
+        let folder = book.url.appendingPathComponent(Self.boneyardFolder, isDirectory: true)
+        let destination: URL
+        do {
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            destination = FileNaming.unique(folder.appendingPathComponent(FileNaming.sanitized(scene.title) + "." + sceneURL.pathExtension)).canonical
+            try FileManager.default.moveItem(at: sceneURL, to: destination)
+        } catch {
+            errorMessage = "Couldn’t move that scene to the Boneyard."
+            return
+        }
+        follow([(sceneURL, destination)])
+        var info = margin.info(for: destination)
+        info.cut = SceneInfo.Cut(from: chapter.implicit ? book.title : chapter.title, number: number,
+                                 chapter: chapter.implicit ? nil : chapter.url.lastPathComponent,
+                                 index: index, date: Date(), before: nil)
+        margin.setInfo(info, for: destination)
+        if wasOpen { selection = neighbour.map { .scene($0.url) } ?? (chapter.implicit ? .book(book.url) : .chapter(chapter.url)) }
+    }
+
+    /// A passage cut from a single document (or screenplay) into its Boneyard, named by its
+    /// first words. `before` is the text just before it, to find its place again. The caller
+    /// takes it out of the page (so Undo puts it back).
+    @discardableResult
+    func addToBoneyard(_ text: String, from book: Book, before: String) -> URL? {
+        guard let document = book.document else { return nil }
+        saveNow()
+        let words = text.split(whereSeparator: \.isWhitespace).prefix(6).joined(separator: " ")
+        let name = FileNaming.sanitized(words.isEmpty ? "Passage" : String(words.prefix(60)))
+        let folder = book.url.appendingPathComponent(Self.boneyardFolder, isDirectory: true)
+        do {
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            let url = FileNaming.unique(folder.appendingPathComponent(name + "." + document.url.pathExtension)).canonical
+            try text.write(to: url, atomically: true, encoding: .utf8)
+            var info = margin.info(for: url)
+            info.cut = SceneInfo.Cut(from: book.title, number: nil, chapter: nil, index: nil, date: Date(), before: before)
+            reload(select: .keep)
+            margin.setInfo(info, for: url)
+            return url
+        } catch {
+            errorMessage = "Couldn’t move that passage to the Boneyard."
+            return nil
+        }
+    }
+
+    /// Restore: a cut scene goes back where it was (its chapter, by folder or title, at its
+    /// place), or into `chapterURL` at its end; a cut passage goes back into its document after
+    /// the text it followed (else at the end) and leaves the Boneyard.
+    func restore(_ sceneURL: URL, into chapterURL: URL? = nil) {
+        guard let (book, chapter) = location(ofScene: sceneURL), chapter.boneyard else { return }
+        saveNow()
+        let cut = margin.info(for: sceneURL).cut
+
+        if let document = book.document {
+            let piece = fileText(at: sceneURL).trimmingCharacters(in: .newlines)
+            var text = fileText(at: document.url)
+            let string = text as NSString
+            var at = string.length
+            if let before = cut?.before, !before.isEmpty {
+                let found = string.range(of: before, options: .backwards)
+                if found.location != NSNotFound { at = NSMaxRange(found) }
+            }
+            // As its own paragraph: a blank line either side, never three line breaks.
+            let head = (string.substring(to: at) as String).replacingOccurrences(of: "\\s+$", with: "", options: .regularExpression)
+            let tail = (string.substring(from: at) as String).replacingOccurrences(of: "^\\s+", with: "", options: .regularExpression)
+            text = [head, piece, tail].filter { !$0.isEmpty }.joined(separator: "\n\n") + (tail.isEmpty ? "\n" : "")
+            do {
+                try text.write(to: document.url, atomically: true, encoding: .utf8)
+                try FileManager.default.trashItem(at: sceneURL, resultingItemURL: nil)
+            } catch {
+                errorMessage = "Couldn’t restore that passage."
+                return
+            }
+            margin.trash(sceneURL)
+            if activeSceneURL == sceneURL { activeSceneURL = nil }
+            reload(select: .none)
+            selection = .scene(document.url)
+            if activeSceneURL == document.url { setText(text) }
+            return
+        }
+
+        let target: Chapter? = chapterURL.flatMap { self.chapter(for: $0) }
+            ?? cut?.chapter.flatMap { name in book.chapters.first { $0.url.lastPathComponent == name } }
+            ?? cut.flatMap { cut in book.chapters.first { !$0.implicit && $0.title == cut.from } }
+            ?? book.chapters.first { $0.implicit }
+            ?? book.chapters.last
+        guard let target else {
+            errorMessage = "This story has no chapter to restore the scene to."
+            return
+        }
+        let index = chapterURL == nil ? min(cut?.index ?? target.scenes.count, target.scenes.count) : target.scenes.count
+        placeScene(sceneURL, inChapter: target.url, at: index)
+        // Back in its chapter: no longer a cut, and open.
+        if let back = self.chapter(for: target.url)?.scenes[safe: index] {
+            var info = margin.info(for: back.url)
+            info.cut = nil
+            margin.setInfo(info, for: back.url)
+            selection = .scene(back.url)
         }
     }
 
@@ -1430,8 +1615,9 @@ final class LibraryStore: ObservableObject {
         read(url)
     }
 
+    /// A scene anywhere: in a chapter, or in a story's Boneyard.
     func scene(for url: URL) -> Scene? {
-        library?.books.flatMap(\.chapters).flatMap(\.scenes).first { $0.url == url }
+        library?.books.flatMap { $0.chapters + ($0.boneyard.map { [$0] } ?? []) }.flatMap(\.scenes).first { $0.url == url }
     }
 
     func chapter(for url: URL) -> Chapter? {
@@ -1482,15 +1668,20 @@ final class LibraryStore: ObservableObject {
         return nil
     }
 
+    /// Where a scene is: its story and chapter (for a cut scene, the story's Boneyard, whose
+    /// `boneyard` is true).
     func location(ofScene url: URL) -> (book: Book, chapter: Chapter)? {
         guard let library else { return nil }
         for book in library.books {
-            for chapter in book.chapters where chapter.scenes.contains(where: { $0.url == url }) {
+            for chapter in book.chapters + (book.boneyard.map { [$0] } ?? []) where chapter.scenes.contains(where: { $0.url == url }) {
                 return (book, chapter)
             }
         }
         return nil
     }
+
+    /// Whether a scene is in a story's Boneyard.
+    func isCut(_ url: URL) -> Bool { location(ofScene: url)?.chapter.boneyard == true }
 
     // MARK: - Counts
 
@@ -1790,6 +1981,10 @@ final class LibraryStore: ObservableObject {
 final class LiveCount: ObservableObject {
     @Published private(set) var words = 0
     @Published private(set) var characters = 0
+    /// Lines of verse (`verseLines`), what a poem's status bar counts.
+    @Published private(set) var lines = 0
+    /// Whether `lines` is kept (the open scene is a poem or song).
+    var countsLines = false
     /// In a screenplay: the element the caret is in ("Dialogue"); nil elsewhere.
     @Published private(set) var element: String?
 
@@ -1802,6 +1997,21 @@ final class LiveCount: ObservableObject {
         let newWords = Self.words(in: string)
         if newWords != words { words = newWords }
         if string.length != characters { characters = string.length }
+        let newLines = countsLines ? Self.verseLines(in: text) : 0
+        if newLines != lines { lines = newLines }
+    }
+
+    /// A poem's lines: those with words on them, leaving out headings ("# Title"), a song's
+    /// labels ("[Chorus]") and footnotes.
+    nonisolated static func verseLines(in text: String) -> Int {
+        var count = 0
+        text.enumerateLines { line, _ in
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard !trimmed.isEmpty, !trimmed.hasPrefix("#"), !trimmed.hasPrefix("[^"),
+                  ManuscriptBuilder.verseLabel(trimmed) == nil else { return }
+            count += 1
+        }
+        return count
     }
 
     /// Counts runs of non-space characters that hold at least one letter or digit, reading the

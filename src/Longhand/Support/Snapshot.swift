@@ -18,6 +18,8 @@ import SwiftUI
 ///     LONGHAND_NOTES=1     open the margin on Notes (otherwise Comments)
 ///     LONGHAND_FOCUS=1     put the first comment in focus
 ///     LONGHAND_CARDS=1     show chapters and books as cards
+///     LONGHAND_CARDSIZE=small|medium|large    the cards' size
+///     LONGHAND_CARDPICK=1 / LONGHAND_CARDEDIT=1   choose the first card / edit it on the board
 ///     LONGHAND_EXPORT=1    open the export sheet and picture it
 ///     LONGHAND_TAB=changes open the margin on a tab (comments, notes, changes)
 ///     LONGHAND_PREVIEW=1   show the scene's newest earlier version
@@ -36,8 +38,17 @@ enum Snapshot {
         ProcessInfo.processInfo.environment["LONGHAND_CHAPTER"] == "1"
     }
 
-    static var wantsBook: Bool {
-        ProcessInfo.processInfo.environment["LONGHAND_BOOK"] == "1"
+    /// The first card on the board, chosen (`pick`) or edited on the card (`edit`), once.
+    @MainActor static var cardPicture: String? = {
+        let environment = ProcessInfo.processInfo.environment
+        return environment["LONGHAND_CARDEDIT"] == "1" ? "edit" : environment["LONGHAND_CARDPICK"] == "1" ? "pick" : nil
+    }()
+
+    static var wantsBook: Bool { bookNumber != nil }
+
+    /// `LONGHAND_BOOK=n` selects the library's nth story (1, the first).
+    static var bookNumber: Int? {
+        ProcessInfo.processInfo.environment["LONGHAND_BOOK"].flatMap(Int.init).flatMap { $0 > 0 ? $0 : nil }
     }
 
     /// `LONGHAND_SCREENPLAY=1` opens the library's first screenplay to write; `=read`, its pages.
@@ -71,6 +82,7 @@ enum Snapshot {
             AppTheme.defaultsKey: environment["LONGHAND_THEME"] ?? AppTheme.paper.rawValue,
             AppTheme.modeKey: "system",
             "showCards": environment["LONGHAND_CARDS"] == "1",
+            CardSize.key: environment["LONGHAND_CARDSIZE"] ?? CardSize.medium.rawValue,
             StoryPage.key: environment["LONGHAND_STORYPAGE"] == "1",
             ScreenplayReader.readingKey: environment["LONGHAND_SCREENPLAY"] == "read",
             // Tests type on the chapter page; pictures show it for reading unless LONGHAND_WRITE=1.
@@ -253,6 +265,14 @@ enum Snapshot {
     @MainActor
     static func prepareExtras(_ store: LibraryStore) {
         if environment["LONGHAND_CHEATSHEET"] == "1" { store.cheatSheetShown = true }
+        // LONGHAND_BONEYARD=1: the first story's first cut scene, open.
+        if environment["LONGHAND_BONEYARD"] == "1" {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                if let scene = store.library?.books.compactMap(\.boneyard).first?.scenes.first { store.selection = .scene(scene.url) }
+            }
+        }
+        // LONGHAND_UPDATE=0.9.9: the status bar as if a newer Longhand were out.
+        if let version = environment["LONGHAND_UPDATE"] { Updates.shared.pretend(version) }
         if environment["LONGHAND_CLEARDESK"] == "1" { store.deskCleared = true }
         // LONGHAND_LIBRARYVIEW=1: the Library, with the first book chosen (its Book Info page).
         if environment["LONGHAND_LIBRARYVIEW"] == "1" {
@@ -288,6 +308,8 @@ enum Snapshot {
                     info.synopsis = "A woman walks out to a house on a tidal island that her brother said would be empty. It isn't."
                     info.authorName = "A. N. Author"
                     info.previousWorks = "The Long Field (2019)"
+                } else if book.url == books.dropFirst().first?.url {
+                    info.form = .poetry
                 }
                 store.margin.setInfo(info, for: book.url)
             }
@@ -302,6 +324,10 @@ enum Snapshot {
             AuthorProfiles.shared.add(AuthorProfile(name: "A. N. Author", penName: "Ann Other",
                                                     address: "12 Tide Lane\nSaltmarsh", email: "ann@example.com", phone: "01234 567890"))
             AuthorProfiles.shared.add(AuthorProfile(name: "Second Writer"))
+            // LONGHAND_AUTHORS=n: that many more (the pane's pop-up from four on).
+            for index in 0..<(Int(environment["LONGHAND_AUTHORS"] ?? "") ?? 0) {
+                AuthorProfiles.shared.add(AuthorProfile(name: "Writer \(index + 3)"))
+            }
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
             let view = NSHostingView(rootView: AnyView(SettingsView(versions: store.versions)))
@@ -645,7 +671,11 @@ enum Snapshot {
                 progress.offerQuitNow = kind == "quitslow"
                 content = AnyView(QuitCard(progress: progress).padding(30))
             case "newdocument":
-                content = AnyView(NewDocumentSheet().environmentObject(store))
+                // LONGHAND_NEWDOC_FORM=poetry chooses a form; LONGHAND_NEWDOC_AUTHOR=name sets up an
+                // author (in memory: hidden runs never write profiles).
+                if let name = environment["LONGHAND_NEWDOC_AUTHOR"] { AuthorProfiles.shared.add(AuthorProfile(name: name)) }
+                let form = environment["LONGHAND_NEWDOC_FORM"].flatMap(BookForm.init(rawValue:)) ?? .novel
+                content = AnyView(NewDocumentSheet(form: form).environmentObject(store))
             case "getlibrary":
                 content = AnyView(GetLibrarySheet(preview: ["writing", "short-fiction", "the-salt-road", "notebooks"])
                     .environmentObject(store).environmentObject(store.versions))

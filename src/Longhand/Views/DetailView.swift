@@ -38,7 +38,7 @@ struct DetailView: View {
                 // cards (or, with Page chosen, its contents page).
                 if let book = store.book(for: url), store.openBook == nil {
                     BookInfoPage(book: book)
-                } else if let book = store.book(for: url), showCards {
+                } else if let book = store.book(for: url), showCards, BookCardsView.hasCards(book) {
                     BookCardsView(book: book)
                 } else if let book = store.book(for: url), storyPage {
                     StoryPage(book: book)
@@ -85,6 +85,10 @@ struct SceneEditorView: View {
             if let location = store.location(ofScene: scene.url) {
                 SceneHeader(scene: scene, book: location.book)
                     .deskFade(store.deskCleared)
+                if location.chapter.boneyard {
+                    BoneyardStrip(scene: scene, book: location.book)
+                        .deskFade(store.deskCleared)
+                }
             }
             // A screenplay's column is its page's sixty characters of Courier Prime.
             Column(width: scene.isScreenplay ? ScreenplayStyler.column : Layout.column) {
@@ -97,11 +101,67 @@ struct SceneEditorView: View {
                     places: store.places,
                     onChange: { store.updateText($0, fromEditor: true, version: $1) },
                     screenplay: scene.isScreenplay,
-                    live: store.live
+                    verse: store.location(ofScene: scene.url).map { store.margin.info(for: $0.book.url).form?.isVerse == true } ?? false,
+                    live: store.live,
+                    // A single document (or screenplay): a selected passage can go to the
+                    // story's Boneyard.
+                    cutPassage: store.location(ofScene: scene.url).flatMap { location in
+                        location.book.document?.url == scene.url ? { [weak store] text, before in
+                            store?.addToBoneyard(text, from: location.book, before: before) != nil
+                        } : nil
+                    }
                 )
                 // One editor for every scene: switching swaps its text (and clears its undo)
                 // rather than building a new text view and laying out the window again.
             }
+        }
+    }
+}
+
+/// Above a cut scene (mock-up board 2): where it was cut from and when, with Restore (to
+/// where it was) and Restore To a chapter. On the chrome grey, a hairline under it.
+struct BoneyardStrip: View {
+    @EnvironmentObject private var store: LibraryStore
+    let scene: Scene
+    let book: Book
+
+    var body: some View {
+        let cut = store.margin.info(for: scene.url).cut
+        VStack(spacing: 0) {
+            HStack(spacing: 10) {
+                Group {
+                    if let cut {
+                        Text("Cut from ") + Text(cut.from).foregroundColor(Color(PaperTheme.ink)).fontWeight(.medium)
+                            + Text(cut.number.map { " (scene \($0))" } ?? "")
+                            + Text(" on \(cut.date.formatted(.dateTime.day().month(.abbreviated)))")
+                    } else {
+                        Text("In the Boneyard")
+                    }
+                }
+                .font(.system(size: Layout.chromeSize))
+                .foregroundStyle(Color(PaperTheme.secondary))
+                .lineLimit(1)
+                Spacer(minLength: 8)
+                Button("Restore") { store.restore(scene.url) }
+                    .buttonStyle(SquareButtonStyle(primary: true))
+                    .help(book.document == nil ? "Put it back in its chapter, where it was" : "Put it back in the story, after the text it followed")
+                if book.document == nil, book.shape == .chaptersAndScenes, book.chapters.count > 1 {
+                    Menu {
+                        ForEach(Array(book.chapters.enumerated()), id: \.element.id) { index, chapter in
+                            Button("\(index + 1)  \(chapter.title)") { store.restore(scene.url, into: chapter.url) }
+                        }
+                    } label: {
+                        Text("Restore To")
+                    }
+                    .menuStyle(.button)
+                    .buttonStyle(SquareButtonStyle())
+                    .fixedSize()
+                }
+            }
+            .padding(.horizontal, Layout.proseInset)
+            .frame(height: 40)
+            .background(Color(PaperTheme.chrome))
+            Rectangle().fill(Color(PaperTheme.hairline)).frame(height: 1)
         }
     }
 }
@@ -353,6 +413,12 @@ struct ChapterDocumentView: View {
 
     private var key: [URL] { [chapter.url] + chapter.scenes.map(\.url) }
 
+    /// Poems or songs: set line by line.
+    private var verse: Bool {
+        store.library?.books.first { $0.chapters.contains { $0.url == chapter.url } }
+            .map { store.margin.info(for: $0.url).form?.isVerse == true } ?? false
+    }
+
     /// Never a new title over the last chapter's text: until `load` has run for this chapter
     /// (just after a switch), its texts are read here, once.
     private var scenes: [ChapterSceneText] {
@@ -370,7 +436,7 @@ struct ChapterDocumentView: View {
             } else {
                 Column {
                     if reading {
-                        ChapterReader(title: chapter.title, number: openerNumber, scenes: scenes, margin: margin)
+                        ChapterReader(title: chapter.title, number: openerNumber, scenes: scenes, margin: margin, verse: verse)
                     } else {
                     ChapterEditor(
                         chapter: chapter.url,
@@ -380,7 +446,8 @@ struct ChapterDocumentView: View {
                         margin: margin,
                         changes: store.versions.changes,
                         places: store.places,
-                        onEdit: { url, text in store.updateChapterScene(url, text: text) }
+                        onEdit: { url, text in store.updateChapterScene(url, text: text) },
+                        verse: verse
                     )
                     }
                 }
@@ -476,7 +543,7 @@ struct StoryPage: View {
             ReadingChapter(title: chapter.title, number: store.names(of: book.url) == .notebook ? nil : store.shownNumber(ofChapter: chapter.url), scenes: chapter.scenes.map { scene in
                 defer { id += 1 }
                 return ChapterSceneText(id: id, url: scene.url, title: scene.title, text: store.fileText(at: scene.url))
-            })
+            }, verse: store.margin.info(for: book.url).form?.isVerse == true)
         }
     }
 }
@@ -604,6 +671,7 @@ struct StatusBar: View {
                 Spacer(minLength: 12)
                 // Chapter and book totals are in the contents; here only where you are in
                 // the versions.
+                UpdateItem(updates: Updates.shared)
                 if store.libraryURL != nil {
                     GitStatus(changes: store.versions.changes)
                         .layoutPriority(1)
@@ -635,10 +703,15 @@ struct StatusBar: View {
     private var count: some View {
         switch store.selection {
         case .scene(let url):
-            if let scene = store.scene(for: url), scene.isScreenplay {
-                ScreenplayCount(title: scene.title, pages: store.pages(of: scene), live: store.live)
-            } else if let scene = store.scene(for: url) {
-                SceneCount(title: scene.title, live: store.live)
+            HStack(spacing: 7) {
+                if let scene = store.scene(for: url), scene.isScreenplay {
+                    ScreenplayCount(title: scene.title, pages: store.pages(of: scene), live: store.live)
+                } else if let scene = store.scene(for: url),
+                          let book = store.location(ofScene: url)?.book, store.margin.info(for: book.url).form?.isVerse == true {
+                    VerseCount(title: scene.title, live: store.live)
+                } else if let scene = store.scene(for: url) {
+                    SceneCount(title: scene.title, live: store.live)
+                }
             }
         case .chapter(let url):
             if let chapter = store.chapter(for: url) {
@@ -779,6 +852,32 @@ private struct GitStatus: View {
 }
 
 /// The open scene's count, watching only the live counts, so a keystroke redraws this alone.
+/// A newer Longhand, when there is one: "0.9.5 available" in a box; click for Download or
+/// What's New. Nothing at all otherwise.
+private struct UpdateItem: View {
+    @ObservedObject var updates: Updates
+
+    var body: some View {
+        if let release = updates.available {
+            Menu {
+                Button("Download Longhand \(release.version)") { updates.download() }
+                Button("What’s New") { updates.showNotes() }
+            } label: {
+                Text("\(release.version) available")
+                    .foregroundStyle(Color(PaperTheme.accent))
+                    .lineLimit(1)
+                    .fixedSize()
+                    .boxed(height: 18, padding: 7)
+            }
+            .menuStyle(.button)
+            .buttonStyle(.plain)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help("A newer Longhand is out (you have \(Updates.current))")
+        }
+    }
+}
+
 /// A screenplay's line: its title, its pages, and the element the caret is in (Tab and
 /// Return move between elements; the tooltip says how).
 private struct ScreenplayCount: View {
@@ -806,6 +905,21 @@ private struct ScreenplayCount: View {
         case "Dialogue": return "Return: action · Tab on an empty line under it: parenthetical"
         case "Parenthetical": return "Return: dialogue"
         default: return "Tab on an empty line: character · Return: a new paragraph"
+        }
+    }
+}
+
+/// A poem's or song's line: its title and its lines (the words in the tooltip).
+private struct VerseCount: View {
+    let title: String
+    @ObservedObject var live: LiveCount
+
+    var body: some View {
+        HStack(spacing: 7) {
+            Text(title).lineLimit(1).truncationMode(.middle)
+            Text(live.lines == 1 ? "1 line" : "\(live.lines.formatted()) lines")
+                .lineLimit(1).fixedSize().boxed(height: 18, padding: 7)
+                .help(Estimate.words(live.words))
         }
     }
 }

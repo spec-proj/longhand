@@ -26,6 +26,13 @@ struct BookInfoPage: View {
     enum Field: Hashable { case title, synopsis, genre, target }
 
     private var info: SceneInfo { margin.info(for: book.url) }
+    /// The author as a blank cover prints them: the profile's byline, else the story's own copy.
+    private var coverByline: String {
+        let info = self.info
+        return authors.profile(info.authorProfile)?.byline
+            ?? [info.authorPenName, info.authorName].compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }.first { !$0.isEmpty }
+            ?? ""
+    }
 
     var body: some View {
         ScrollView {
@@ -91,7 +98,8 @@ struct BookInfoPage: View {
         // (owner, 2026-11-13). The stage and figures follow below, the page's full width.
         return HStack(alignment: .top, spacing: 24) {
             let _ = margin.coverVersion
-            BookCover(title: book.title, image: margin.cover(of: book.url), width: Self.coverWidth)
+            BookCover(title: book.title, image: margin.cover(of: book.url), width: Self.coverWidth,
+                      form: info.form, byline: coverByline, collection: info.collection)
             VStack(alignment: .leading, spacing: 10) {
                 // Edit sits where Done does in the form, so it never moves under the pointer.
                 Text(book.title)
@@ -144,7 +152,7 @@ struct BookInfoPage: View {
 
     private var standingParts: [AnyView] {
         let info = self.info
-        let kind = [info.genre, info.form?.title].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " / ")
+        let kind = [info.genre, info.form?.title(collection: info.collection)].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " / ")
         var parts: [AnyView] = []
         if let stage = info.stage {
             // Not a badge inside the box: its part of the strip is filled with the stage's
@@ -224,7 +232,8 @@ struct BookInfoPage: View {
                 }
                 labelled("Form") {
                     // A menu like Genre's below it: five forms don't fit side by side.
-                    FormMenu(form: info.form) { form in update { $0.form = form } }
+                    FormMenu(form: info.form, collection: info.collection,
+                             setCollection: { value in update { $0.collection = value } }) { form in update { $0.form = form } }
                 }
                 labelled("Genre") {
                     GenreMenu(genre: info.genre) { value in update { $0.genre = value } }
@@ -292,7 +301,8 @@ struct BookInfoPage: View {
     private var cover: some View {
         let _ = margin.coverVersion
         return Button(action: chooseCover) {
-            BookCover(title: book.title, image: margin.cover(of: book.url), width: Self.coverWidth)
+            BookCover(title: book.title, image: margin.cover(of: book.url), width: Self.coverWidth,
+                      form: info.form, byline: coverByline, collection: info.collection)
                 .overlay {
                     if dropping { rounded(Layout.radius).strokeBorder(Color(PaperTheme.accent), lineWidth: 2) }
                 }
@@ -779,9 +789,12 @@ enum Genres {
 }
 
 /// The genre as a menu (a framed button like a pop-up); None clears it.
-/// The story's form (Novel, Novella, Short Story, Essay, Notebook) as a menu.
+/// The story's form (Novel, Novella, Short Story, Poetry…) as a menu, and for a form that can
+/// be one piece or several, Collection.
 struct FormMenu: View {
     let form: BookForm?
+    var collection: Bool? = nil
+    var setCollection: (Bool) -> Void = { _ in }
     let choose: (BookForm?) -> Void
 
     var body: some View {
@@ -791,9 +804,13 @@ struct FormMenu: View {
             ForEach(BookForm.allCases) { option in
                 Toggle(option.title, isOn: Binding(get: { option == form }, set: { if $0 { choose(option) } }))
             }
+            if let form, form.collects {
+                Divider()
+                Toggle("Collection", isOn: Binding(get: { collection ?? form.collectionByDefault }, set: { setCollection($0) }))
+            }
         } label: {
             HStack(spacing: 6) {
-                Text(form?.title ?? "None")
+                Text(form?.title(collection: collection) ?? "None")
                     .foregroundStyle(Color(form == nil ? PaperTheme.secondary : PaperTheme.ink))
                     .lineLimit(1)
                 Spacer(minLength: 6)

@@ -149,7 +149,9 @@ extension Git {
     static func isScene(_ path: String) -> Bool {
         let parts = path.split(separator: "/")
         guard (2...4).contains(parts.count) else { return false }
+        // A story's Notes and Boneyard hold notes and cut scenes, not scenes.
         return !parts[0].hasPrefix(".") && !parts.dropFirst().dropLast().contains("Notes")
+            && !parts.dropFirst().dropLast().contains(Substring(StoryFolders.boneyard))
             && ProseFile.isProse(String(parts[parts.count - 1]))
     }
 

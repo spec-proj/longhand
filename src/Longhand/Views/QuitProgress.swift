@@ -10,7 +10,10 @@ final class LonghandAppDelegate: NSObject, NSApplicationDelegate {
     @MainActor static weak var store: LibraryStore?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        MainActor.assumeIsolated { MenuBarItem.shared.start() }
+        MainActor.assumeIsolated {
+            MenuBarItem.shared.start()
+            Updates.shared.start()
+        }
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {

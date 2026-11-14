@@ -186,7 +186,7 @@ extension Git {
         }
         for book in books {
             let bookURL = root.appendingPathComponent(book)
-            for chapter in (try? fm.contentsOfDirectory(atPath: bookURL.path)) ?? [] where !chapter.hasPrefix(".") && chapter != "Notes" {
+            for chapter in (try? fm.contentsOfDirectory(atPath: bookURL.path)) ?? [] where !chapter.hasPrefix(".") && chapter != "Notes" && chapter != StoryFolders.boneyard {
                 // Scenes only, or one document: Markdown files straight in the story's folder.
                 if ProseFile.isProse(chapter) {
                     paths.append("\(book)/\(chapter)")

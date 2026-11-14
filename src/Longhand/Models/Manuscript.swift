@@ -65,6 +65,9 @@ struct Book: Identifiable, Equatable {
     /// The folder the book is in, if any.
     var folder: URL? = nil
     var shape: BookShape = .chaptersAndScenes
+    /// Cut scenes and passages, kept in the story's `Boneyard` folder (owner, 2026-11-14): out
+    /// of `chapters`, so out of the manuscript, counts and export.
+    var boneyard: Chapter?
 
     /// A scenes-only story or a single document: its files, straight in its folder.
     var looseScenes: [Scene] { chapters.first(where: \.implicit)?.scenes ?? [] }
@@ -83,6 +86,8 @@ struct Chapter: Identifiable, Equatable {
     /// Not a folder of its own: the story's folder, holding a scenes-only story's scenes or a
     /// single document. Never shown as a chapter.
     var implicit = false
+    /// The story's Boneyard folder (`Book.boneyard`), never one of its chapters.
+    var boneyard = false
 }
 
 struct Scene: Identifiable, Equatable {
@@ -106,7 +111,24 @@ struct PartNames: Equatable {
     static let story = PartNames(chapter: "Chapter", chapters: "Chapters", scene: "Scene", scenes: "Scenes")
     static let notebook = PartNames(chapter: "Folder", chapters: "Folders", scene: "Note", scenes: "Notes")
 
-    static func of(_ form: BookForm?) -> PartNames { form == .notebook ? .notebook : .story }
+    static let poems = PartNames(chapter: "Section", chapters: "Sections", scene: "Poem", scenes: "Poems")
+    static let songs = PartNames(chapter: "Section", chapters: "Sections", scene: "Song", scenes: "Songs")
+    static let stories = PartNames(chapter: "Story", chapters: "Stories", scene: "Scene", scenes: "Scenes")
+    static let essays = PartNames(chapter: "Essay", chapters: "Essays", scene: "Section", scenes: "Sections")
+
+    /// What a form calls its parts; a collection of short stories or essays names its
+    /// chapters after them.
+    static func of(_ form: BookForm?, collection: Bool? = nil) -> PartNames {
+        let collected = collection ?? form?.collectionByDefault ?? false
+        switch form {
+        case .notebook: return .notebook
+        case .poetry: return .poems
+        case .lyrics: return .songs
+        case .shortStory where collected: return .stories
+        case .essay where collected: return .essays
+        default: return .story
+        }
+    }
 
     /// "1 scene", "3 notes".
     func count(_ n: Int, chapters: Bool = false) -> String {

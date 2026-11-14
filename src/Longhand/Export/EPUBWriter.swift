@@ -169,6 +169,17 @@ enum EPUBWriter {
                 html += "<blockquote><p>\(inline(runs))</p></blockquote>"
             case .sceneBreak:
                 html += #"<p class="break" role="separator">*&#8194;*&#8194;*</p>"#
+            case .stanza(let lines):
+                // Verse: a stanza is a block, each line its own, its indent kept.
+                html += #"<div class="stanza">"#
+                for line in lines {
+                    let kind = line.label ? "label" : "line"
+                    let indent = line.indent > 0 ? #" style="margin-left: \#(Double(line.indent) * 0.3 + 1.5)em""# : ""
+                    html += #"<p class="\#(kind)"\#(indent)>\#(inline(line.runs))</p>"#
+                }
+                html += "</div>"
+            case .pageBreak:
+                html += #"<div class="page"></div>"#
             case .table(let rows):
                 html += "<table>"
                 for (index, row) in rows.enumerated() {
@@ -225,6 +236,10 @@ enum EPUBWriter {
         h2 { font-weight: normal; font-style: italic; font-size: 1em; text-align: center; margin: 1.5em 0 0.75em; }
         blockquote { margin: 0.75em 1.5em; }
         blockquote p { text-indent: 0; }
+        div.stanza { margin: 0 0 1em 0; }
+        div.stanza p { text-indent: -1.5em; margin-left: 1.5em; text-align: left; hyphens: none; -webkit-hyphens: none; }
+        div.stanza p.label { font-style: italic; }
+        div.page { page-break-after: always; break-after: page; }
         table { border-collapse: collapse; margin: 1em auto; }
         th, td { border: 0.5px solid currentColor; padding: 0.2em 0.5em; text-align: left; }
         sup { font-size: 0.7em; line-height: 0; }

@@ -134,3 +134,9 @@ enum ProseFile {
     /// Git pathspecs for every scene file.
     static let pathspecs = ["*.md", "*.fountain"]
 }
+
+/// Folders inside a story that hold no chapters: its notes, and its cut scenes and passages.
+enum StoryFolders {
+    static let notes = "Notes"
+    static let boneyard = "Boneyard"
+}

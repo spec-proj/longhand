@@ -941,8 +941,9 @@ struct BookProgress: View {
             let progress = store.targetProgress(of: book)
             HStack(spacing: 10) {
                 Badge("\(progress.done.formatted()) of \(goal.formatted()) \(progress.unit)")
+                    .fixedSize()
                 ProgressRule(fraction: Double(progress.done) / Double(goal))
-                    .frame(width: 160)
+                    .frame(minWidth: 40, maxWidth: 160)
             }
         }
     }

@@ -129,11 +129,20 @@ final class SheetsView: NSView {
     }
 
     func fit(width: CGFloat) {
-        scale = max(0.5, min(1.25, (width - 2 * gap) / paper.size.width))
+        // The same line stays at the top as the pages grow or shrink.
+        let top = pages.isEmpty ? nil : topSource()
+        let scale = max(0.5, min(1.25, (width - 2 * gap) / paper.size.width))
         let height = CGFloat(count) * (paper.size.height * scale + gap) + gap
+        let changed = scale != self.scale
+        self.scale = scale
         setFrameSize(NSSize(width: width, height: max(height, superview?.bounds.height ?? 0)))
         needsDisplay = true
+        if changed, let top = pinned ?? top { show(source: top) }
     }
+
+    /// The line last put at the top by `show(source:)`, while the page stays where it put it.
+    private var pinned: Int?
+    private var pinnedY: CGFloat = -1
 
     private func origin(of index: Int) -> NSPoint {
         NSPoint(x: ((bounds.width - paper.size.width * scale) / 2).rounded(),
@@ -158,10 +167,15 @@ final class SheetsView: NSView {
         guard let place = row(of: source) else { return }
         let y = origin(of: place.page).y + (72 + CGFloat(place.row) * ScreenplayPDF.row) * scale - gap
         scroll(NSPoint(x: 0, y: max(0, y)))
+        pinned = source
+        pinnedY = visibleRect.minY
     }
 
     /// Where in the file the first line on show comes from.
     func topSource() -> Int? {
+        // Not scrolled since a line was put at the top: that line.
+        if let pinned, abs(visibleRect.minY - pinnedY) < 1 { return pinned }
+        pinned = nil
         let top = visibleRect.minY + gap
         let pageHeight = paper.size.height * scale + gap
         let index = max(0, Int((top - gap) / pageHeight))

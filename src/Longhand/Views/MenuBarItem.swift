@@ -131,6 +131,10 @@ final class MenuBarItem: NSObject {
         } else {
             add("Open Longhand", #selector(showWindow))
         }
+        if let release = Updates.shared.available {
+            menu.addItem(.separator())
+            add("Download Longhand \(release.version)…", #selector(downloadUpdate))
+        }
         menu.addItem(.separator())
         add("Settings…", #selector(settings))
         add("Quit Longhand", #selector(quit))
@@ -145,4 +149,5 @@ final class MenuBarItem: NSObject {
         Commands.openSettings()
     }
     @objc private func quit() { NSApp.terminate(nil) }
+    @objc private func downloadUpdate() { Updates.shared.download() }
 }

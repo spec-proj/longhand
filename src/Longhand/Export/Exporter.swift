@@ -16,19 +16,21 @@ enum Exporter {
         return library.books.first
     }
 
-    static func manuscript(of book: Book, store: LibraryStore) -> ManuscriptBook {
+    static func manuscript(of book: Book, store: LibraryStore, poemPerPage: Bool = true) -> ManuscriptBook {
         store.saveNow()
         let chapters = book.chapters.map { chapter in
             (title: chapter.title, scenes: chapter.scenes.map { (title: $0.title, text: store.fileText(at: $0.url)) })
         }
         // Scenes only, or one document: a single run of text, with no "Chapter 1" above it.
         let implicit = book.chapters.contains(where: \.implicit)
+        let info = store.margin.info(for: book.url)
         return ManuscriptBuilder.make(title: book.title, chapters: chapters, words: store.wordCount(of: book),
-                                      numbered: !implicit && store.margin.info(for: book.url).hideChapterNumbers != true)
+                                      numbered: !implicit && info.hideChapterNumbers != true,
+                                      verse: info.form?.isVerse == true, poemPerPage: poemPerPage)
     }
 
     static func export(_ book: Book, store: LibraryStore, settings: ExportSettings, to url: URL) throws {
-        let manuscript = manuscript(of: book, store: store)
+        let manuscript = manuscript(of: book, store: store, poemPerPage: settings.poemPerPage)
         switch settings.format {
         case .manuscriptWord: try DocxWriter.write(manuscript, settings: settings, to: url)
         case .manuscriptPDF: try PDFWriter.writeManuscript(manuscript, settings: settings, to: url)
@@ -58,7 +60,7 @@ enum Exporter {
         let info = store.margin.info(for: book.url)
         var author = ExportSettings()
         author.useAuthor(info)
-        return .init(title: book.title, author: author.byline, form: LetteredCover.formLine(info.form))
+        return .init(title: book.title, author: author.byline, form: LetteredCover.formLine(info.form, collection: info.collection))
     }
 
     static func suggestedName(_ book: Book, _ settings: ExportSettings) -> String {

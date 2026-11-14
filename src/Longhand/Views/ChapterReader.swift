@@ -16,8 +16,8 @@ struct ChapterReader: NSViewRepresentable {
     var heading: StoryHeading?
     var margin: MarginStore
 
-    init(title: String, number: Int?, scenes: [ChapterSceneText], margin: MarginStore) {
-        chapters = [ReadingChapter(title: title, number: number, scenes: scenes)]
+    init(title: String, number: Int?, scenes: [ChapterSceneText], margin: MarginStore, verse: Bool = false) {
+        chapters = [ReadingChapter(title: title, number: number, scenes: scenes, verse: verse)]
         heading = nil
         self.margin = margin
     }
@@ -201,7 +201,12 @@ struct ChapterReader: NSViewRepresentable {
         if let heading { page.append(heading.text()) }
         var maps: [URL: ReadingMap] = [:]
         for (index, chapter) in chapters.enumerated() {
-            let opener = NSMutableAttributedString(attributedString: ChapterOpener.text(title: chapter.title, number: chapter.number))
+            // A story of one run of text (scenes only, or one document): its title page
+            // already says its name, so no opener repeats it.
+            let repeatsTitle = chapters.count == 1 && chapter.number == nil
+                && heading.map { $0.title.caseInsensitiveCompare(chapter.title) == .orderedSame } == true
+            let opener = NSMutableAttributedString(attributedString: repeatsTitle ? NSAttributedString()
+                : ChapterOpener.text(title: chapter.title, number: chapter.number))
             // A chapter after another (or after the title page) starts well down, as on a new page.
             if index > 0 || heading != nil, opener.length > 0,
                let style = (opener.attribute(.paragraphStyle, at: 0, effectiveRange: nil) as? NSParagraphStyle)?.mutableCopy() as? NSMutableParagraphStyle {
@@ -209,26 +214,46 @@ struct ChapterReader: NSViewRepresentable {
                 opener.addAttribute(.paragraphStyle, value: style, range: (opener.string as NSString).paragraphRange(for: NSRange(location: 0, length: 0)))
             }
             page.append(opener)
-            appendChapter(chapter.scenes, to: page, maps: &maps)
+            appendChapter(chapter.scenes, to: page, maps: &maps, verse: chapter.verse,
+                          skipTitles: [chapter.title, heading?.title].compactMap { $0 })
         }
         return (page, maps)
     }
 
     /// One chapter's scenes, with a break between them and its notes after them.
-    private static func appendChapter(_ scenes: [ChapterSceneText], to page: NSMutableAttributedString, maps: inout [URL: ReadingMap]) {
+    private static func appendChapter(_ scenes: [ChapterSceneText], to page: NSMutableAttributedString, maps: inout [URL: ReadingMap],
+                                      verse: Bool = false, skipTitles: [String] = []) {
         var notes: [String] = []
         var first = true
         for scene in scenes {
-            let readable = readableLines(scene.text, sceneTitle: scene.title, notes: &notes)
+            let readable = readableLines(scene.text, sceneTitle: scene.title, notes: &notes, verse: verse)
             guard !readable.text.isEmpty else { continue }
-            if !first {
+            if verse {
+                // Each poem under its own title, a small ornament before every one after the
+                // first; none for a single poem whose title is the story's.
+                if !first { page.append(NSAttributedString(string: "·\n", attributes: PoemTitle.ornament)) }
+                if !skipTitles.contains(where: { $0.caseInsensitiveCompare(scene.title) == .orderedSame }) {
+                    page.append(NSAttributedString(string: scene.title + "\n", attributes: PoemTitle.attributes))
+                }
+            } else if !first {
                 page.append(NSAttributedString(string: SceneBreak.ornament + "\n", attributes: SceneBreak.attributes))
             }
             first = false
             let storage = NSTextStorage(string: readable.text + "\n")
-            let removed = MarkdownStyler.applyReader(to: storage, removing: readable.removed)
+            let removed = MarkdownStyler.applyReader(to: storage, removing: readable.removed, verse: verse)
             // Where a place in the readable text is once the symbols are gone.
             func kept(_ index: Int) -> Int { index - removed.count(in: 0..<index) }
+            // A stanza's first line stands a line apart from the one before.
+            let string = storage.string as NSString
+            for start in readable.stanzas {
+                let at = kept(start)
+                guard at < string.length else { continue }
+                let range = string.paragraphRange(for: NSRange(location: at, length: 0))
+                if let style = (storage.attribute(.paragraphStyle, at: at, effectiveRange: nil) as? NSParagraphStyle)?.mutableCopy() as? NSMutableParagraphStyle {
+                    style.paragraphSpacingBefore = (Layout.textSize * 1.3).rounded()
+                    storage.addAttribute(.paragraphStyle, value: style, range: range)
+                }
+            }
             setTables(readable.tableRows.map { row in
                 (NSRange(location: kept(row.range.location), length: kept(NSMaxRange(row.range)) - kept(row.range.location)), row.heading, row.table)
             }, in: storage)
@@ -244,9 +269,9 @@ struct ChapterReader: NSViewRepresentable {
     /// A scene's Markdown as the lines a reader sees: no blank lines (paragraphs are told
     /// apart by their indent), no heading that only repeats the scene's name, and every
     /// break written as three spaced asterisks.
-    static func readable(_ markdown: String, sceneTitle: String) -> String {
+    static func readable(_ markdown: String, sceneTitle: String, verse: Bool = false) -> String {
         var notes: [String] = []
-        return readableLines(markdown, sceneTitle: sceneTitle, notes: &notes).text
+        return readableLines(markdown, sceneTitle: sceneTitle, notes: &notes, verse: verse).text
     }
 
     /// A scene made ready for the reading page. `text` keeps every character of the lines it
@@ -260,6 +285,8 @@ struct ChapterReader: NSViewRepresentable {
         var tableRows: [(range: NSRange, heading: Bool, table: Int)] = []
         /// Footnote numbers in `text`.
         var calls: [NSRange] = []
+        /// Verse: where each stanza after the first starts in `text` (a blank line before it).
+        var stanzas: [Int] = []
     }
 
     private enum LineKind { case text, row(heading: Bool, table: Int) }
@@ -271,7 +298,7 @@ struct ChapterReader: NSViewRepresentable {
 
     /// `readable`, and which stretches of the Markdown each kept line came from. Footnotes
     /// this scene calls out are added to `notes`, numbered on from the scenes before it.
-    private static func readableLines(_ markdown: String, sceneTitle: String, notes: inout [String]) -> Readable {
+    private static func readableLines(_ markdown: String, sceneTitle: String, notes: inout [String], verse: Bool = false) -> Readable {
         let source = markdown as NSString
         var all: [NSRange] = []
         source.enumerateSubstrings(in: NSRange(location: 0, length: source.length), options: [.byLines, .substringNotRequired]) { _, range, _, _ in
@@ -320,7 +347,13 @@ struct ChapterReader: NSViewRepresentable {
         }
 
         var lines: [(text: String, from: NSRange?, kind: LineKind)] = []
-        for index in all.indices where !skipped.contains(index) && !blank(index) {
+        // Verse: which kept lines come after a blank one (a new stanza).
+        var afterBlank = Set<Int>()
+        var sawBlank = false
+        for index in all.indices where !skipped.contains(index) {
+            if blank(index) { sawBlank = true; continue }
+            defer { sawBlank = false }
+            if verse, sawBlank, !lines.isEmpty { afterBlank.insert(lines.count) }
             let raw = text(index)
             let line = raw.trimmingCharacters(in: .whitespaces)
             let whole = NSRange(location: 0, length: (line as NSString).length)
@@ -335,8 +368,10 @@ struct ChapterReader: NSViewRepresentable {
             }
         }
         // A break at the very start or end of a scene would double the one between scenes.
-        while let line = lines.first, line.from == nil { lines.removeFirst() }
+        var dropped = 0
+        while let line = lines.first, line.from == nil { lines.removeFirst(); dropped += 1 }
         while let line = lines.last, line.from == nil { lines.removeLast() }
+        if dropped > 0 { afterBlank = Set(afterBlank.map { $0 - dropped }.filter { $0 > 0 }) }
 
         var result = Readable()
         var out: [String] = []
@@ -360,6 +395,7 @@ struct ChapterReader: NSViewRepresentable {
                 result.calls.append(NSRange(location: at + match.range.location, length: digits.count))
             }
             if let from = line.from { result.pieces.append(.init(source: from.location, page: at, length: from.length)) }
+            if afterBlank.contains(position) { result.stanzas.append(at) }
             out.append(String(utf16CodeUnits: units, count: units.count))
             at += units.count
         }
@@ -496,10 +532,34 @@ struct ChapterReader: NSViewRepresentable {
 }
 
 /// One chapter on a reading page.
+/// A poem's title on the Read page, and the small ornament between poems (verse stories).
+enum PoemTitle {
+    static var attributes: [NSAttributedString.Key: Any] {
+        let style = NSMutableParagraphStyle()
+        style.firstLineHeadIndent = Layout.hang
+        style.headIndent = Layout.hang
+        style.tailIndent = -Layout.hang
+        style.paragraphSpacing = (Layout.textSize * 1.1).rounded()
+        return [.font: EditorFont.serif((Layout.textSize * 1.15).rounded(), weight: .semibold),
+                .foregroundColor: PaperTheme.ink, .paragraphStyle: style, SceneBreak.key: true]
+    }
+
+    static var ornament: [NSAttributedString.Key: Any] {
+        var attributes = SceneBreak.attributes
+        let style = (attributes[.paragraphStyle] as? NSParagraphStyle)?.mutableCopy() as? NSMutableParagraphStyle ?? NSMutableParagraphStyle()
+        style.paragraphSpacingBefore = (Layout.textSize * 1.8).rounded()
+        style.paragraphSpacing = (Layout.textSize * 1.8).rounded()
+        attributes[.paragraphStyle] = style
+        return attributes
+    }
+}
+
 struct ReadingChapter: Equatable {
     let title: String
     let number: Int?
     let scenes: [ChapterSceneText]
+    /// Poems or songs: each under its title, every line as written, stanzas apart.
+    var verse = false
 }
 
 /// A whole story's title page: its title and its author, centred.
