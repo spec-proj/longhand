@@ -1,0 +1,57 @@
+name: Longhand
+options:
+  bundleIdPrefix: com.specproj
+  deploymentTarget:
+    macOS: "26.0"
+  createIntermediateGroups: true
+  groupSortPosition: top
+
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MACOSX_DEPLOYMENT_TARGET: "26.0"
+    CODE_SIGN_IDENTITY: "-"
+    CODE_SIGNING_REQUIRED: NO
+    CODE_SIGNING_ALLOWED: NO
+    ENABLE_HARDENED_RUNTIME: NO
+    ENABLE_APP_SANDBOX: NO
+    DEVELOPMENT_TEAM: ""
+    MARKETING_VERSION: "0.9"
+    CURRENT_PROJECT_VERSION: "1"
+
+targets:
+  Longhand:
+    type: application
+    platform: macOS
+    sources:
+      - path: src/Longhand
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.specproj.longhand
+        PRODUCT_NAME: Longhand
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ENABLE_PREVIEWS: YES
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.productivity
+    info:
+      path: Support/Info.plist
+      properties:
+        CFBundleDisplayName: Longhand
+        CFBundleName: Longhand
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        LSMinimumSystemVersion: "26.0"
+        LSApplicationCategoryType: public.app-category.productivity
+        NSHighResolutionCapable: true
+        NSSupportsAutomaticTermination: true
+        NSSupportsSuddenTermination: false
+        NSHumanReadableCopyright: ""
+
+schemes:
+  Longhand:
+    build:
+      targets:
+        Longhand: all
+    run:
+      config: Debug
+    archive:
+      config: Release

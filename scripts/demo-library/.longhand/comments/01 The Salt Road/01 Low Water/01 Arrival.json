@@ -1,0 +1,38 @@
+{
+  "comments": [
+    {
+      "created": "2026-11-05T16:20:00Z",
+      "id": "3E0493AC-3914-4892-B38B-89F93963C248",
+      "length": 27,
+      "location": 42,
+      "prefix": "\nShe walked out at low tide and ",
+      "quote": "counted the ribs of a wreck",
+      "resolved": false,
+      "suffix": ". The sand was *cold* under her ",
+      "text": "Is the wreck the same boat as in chapter 2? Decide."
+    },
+    {
+      "created": "2026-11-06T09:42:00Z",
+      "id": "11BAC314-4B96-4018-9ADB-3BC11EA0ED9A",
+      "length": 33,
+      "location": 248,
+      "prefix": "use would be empty. It was not. ",
+      "quote": "A lamp burned in the upper window",
+      "resolved": false,
+      "suffix": ", and somebody had swept the ste",
+      "text": "Who lit it? Keep this unexplained until The House."
+    },
+    {
+      "created": "2026-11-04T11:05:00Z",
+      "id": "EDC90A35-FABD-458E-9B9C-B43A9885A834",
+      "length": 22,
+      "location": 156,
+      "prefix": "e in sideways from the estuary, ",
+      "quote": "the colour of weak tea",
+      "resolved": true,
+      "suffix": ".\n\nHer brother had written that ",
+      "text": "Third tea image in this chapter."
+    }
+  ],
+  "version": 1
+}
