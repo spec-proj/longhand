@@ -27,8 +27,6 @@ Contribute: [Building Longhand](CONTRIBUTING.md).
 - A boneyard for scrapped scenes.
 - Poetry/lyrics formatting.
 
----
-
 ## Credits
 
 Themes: `third_party/THEMES.md`.  
