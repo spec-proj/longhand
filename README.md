@@ -18,10 +18,6 @@ _Longhand isn't notarised, so macOS asks before opening it the first time. Open 
 
 Contribute: [Building Longhand](CONTRIBUTING.md).
 
-## Coming Soon
-- A boneyard for scrapped scenes.
-- Poetry/lyrics formatting.
-
 ## Credits
 
 Themes: `third_party/THEMES.md`.  
