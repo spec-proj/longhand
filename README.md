@@ -22,7 +22,6 @@ Contribute: [Building Longhand](CONTRIBUTING.md).
 
 ## Coming Soon
 - Screenplay formatting and export, including .fdx.
-- A dedicated notepad area.
 - A boneyard for scrapped scenes.
 - Poetry/lyrics formatting.
 
