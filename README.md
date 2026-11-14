@@ -1,5 +1,3 @@
-<img width="2000" height="1273" alt="image" src="https://github.com/user-attachments/assets/ae65a8e0-2473-4084-b20a-e7fdf134269b" /># Longhand
-
 ![Longhand: Write where you are.](docs/images/readme-banner.jpg)
 
 A writing app for fiction, essays and more, saved as .md files and tracked with Git.
