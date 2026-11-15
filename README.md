@@ -9,7 +9,7 @@ A writing app for fiction, essays and more, saved as .md files and tracked with 
   <img src="https://alternativeto.net/static/badges/badge-compact-dark.svg"
        alt="Longhand | AlternativeTo"
        width="171" height="58"
-       style="width: 86px; height: 29px;" />
+       style="width: 171px; height: 58px;" />
 </a>
 
 ## Features
