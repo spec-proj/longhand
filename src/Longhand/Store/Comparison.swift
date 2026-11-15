@@ -194,8 +194,9 @@ extension Git {
             cursor = data.index(after: newline)
             // "<sha> blob <size>", or "<name> missing".
             guard header.count == 3, let size = Int(header[2]) else { continue }
+            guard size <= data.endIndex - cursor else { break }
             let end = data.index(cursor, offsetBy: size)
-            texts[request] = String(decoding: data[cursor..<end], as: UTF8.self)
+            texts[request] = String.prose(data: data[cursor..<end]) ?? ""
             cursor = data.index(after: end)
         }
         return texts
@@ -203,9 +204,10 @@ extension Git {
 
     static func show(_ root: URL, _ revision: String, _ path: String) -> String {
         // Not `run`: its output is trimmed, and a scene's own spacing must be kept.
-        let result = Process.capture(executable, ["cat-file", "blob", "\(revision):\(path)"], in: root,
-                                     timeout: 30, trim: false)
-        return result.ok ? result.output : ""
+        // Read as the file itself is (a scene committed in an older encoding, restored as
+        // UTF-8, came back with its accents replaced).
+        let result = Process.captureData(executable, ["cat-file", "blob", "\(revision):\(path)"], in: root, timeout: 30)
+        return result.status == 0 ? String.prose(data: result.output) ?? "" : ""
     }
 
     /// Every version, newest first, with the names of drafts.

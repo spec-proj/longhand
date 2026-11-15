@@ -65,12 +65,14 @@ private struct DraftSheet: View {
     @State private var name = ""
     @State private var note = ""
     @State private var failure: String?
+    /// "Draft 3", asked of Git once as the sheet opens (asked in the body, it ran Git on every key).
+    @State private var suggested = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             SheetTitle("New Tag")
             VStack(spacing: 12) {
-                SheetField(label: "Name", placeholder: versions.nextDraftName, text: $name)
+                SheetField(label: "Name", placeholder: suggested, text: $name)
                     .help("A name for this point in the work, such as Second draft or Sent to editor")
                 SheetField(label: "Message", placeholder: "Optional", text: $note)
             }
@@ -90,7 +92,10 @@ private struct DraftSheet: View {
                 .disabled(versions.busy || !versions.available)
             }
         }
-        .onAppear { if name.isEmpty { name = versions.nextDraftName } }
+        .onAppear {
+            suggested = versions.nextDraftName
+            if name.isEmpty { name = suggested }
+        }
     }
 }
 

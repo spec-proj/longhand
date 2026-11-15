@@ -18,6 +18,7 @@ struct SettingsView: View {
 
     /// The open library's versions, for the Backup section (nil in a bare preview).
     var versions: VersionStore?
+    @StateObject private var stops = KeyStops()
     @State private var pane = ProcessInfo.processInfo.environment["LONGHAND_SETTINGS_PANE"] ?? SettingsView.wanted ?? "appearance"
 
     /// The pane to show when Settings next opens (or now, if it is open).
@@ -36,7 +37,8 @@ struct SettingsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 22) {
-            Segments(options: [("appearance", "Appearance"), ("editor", "Editor"), ("authors", "Authors"), ("backup", "Git")], value: $pane)
+            // The first stop: ← → change pane, Tab goes on into it.
+            Segments(options: [("appearance", "Appearance"), ("editor", "Editor"), ("authors", "Authors"), ("backup", "Git")], value: $pane, first: true)
                 .frame(maxWidth: .infinity)
 
             if pane == "appearance" {
@@ -80,7 +82,7 @@ struct SettingsView: View {
                         Button("Actual Size") { ProseSize.step(0) }
                             .disabled(proseSize == 0)
                     }
-                    .buttonStyle(FramedButtonStyle())
+                    .buttonStyle(KeyFramedButtonStyle())
                 }
                 row("Focus") {
                     HStack(spacing: 10) {
@@ -117,6 +119,9 @@ struct SettingsView: View {
         .frame(width: 560)
         .fixedSize(horizontal: false, vertical: true)
         .background(Color(PaperTheme.chrome))
+        // Worked from the keyboard: Tab and ⇧Tab from control to control, Space presses,
+        // ← → step segments.
+        .keyStops(stops)
         .onReceive(NotificationCenter.default.publisher(for: SettingsView.paneChange)) { note in
             if let wanted = note.object as? String { pane = wanted }
         }
@@ -197,7 +202,7 @@ private struct AuthorSettings: View {
                     .help("Stories already using this author keep their details")
                 }
             }
-            .buttonStyle(FramedButtonStyle())
+            .buttonStyle(KeyFramedButtonStyle())
 
             if current != nil {
                 VStack(alignment: .leading, spacing: 10) {
@@ -309,7 +314,7 @@ private struct BackupSettings: View {
                     Button(place.repository) { if let page = versions.backupPage { open(page) } }
                         .help("View this repository on GitHub")
                 }
-                .buttonStyle(FramedButtonStyle())
+                .buttonStyle(KeyFramedButtonStyle())
                 .padding(.leading, 162)
                 actions {
                     Button("Activity…") {
@@ -389,7 +394,7 @@ private struct BackupSettings: View {
 
     private func actions<Content: View>(@ViewBuilder content: () -> Content) -> some View {
         HStack(spacing: 6) { content() }
-            .buttonStyle(FramedButtonStyle())
+            .buttonStyle(KeyFramedButtonStyle())
             .padding(.leading, 162)
     }
 }
@@ -422,7 +427,9 @@ private struct ThemeMenu: View {
             .background(AnchorView(anchor: anchor))
         }
         .buttonStyle(.plain)
+        .focusable(false)
         .fixedSize()
+        .keyControl { ThemeMenuController.shared.show(from: anchor.view, current: theme, dark: dark) }
     }
 }
 
@@ -544,6 +551,8 @@ struct SquareCheckbox: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .focusable(false)
+        .keyControl(radius: Layout.smallRadius + 1) { isOn.toggle() }
     }
 }
 
@@ -551,6 +560,8 @@ struct SquareCheckbox: View {
 struct Segments: View {
     let options: [(value: String, title: String)]
     @Binding var value: String
+    /// Takes the keyboard as its window opens.
+    var first = false
     @Environment(\.isEnabled) private var isEnabled
 
     var body: some View {
@@ -568,6 +579,7 @@ struct Segments: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .focusable(false)
             }
         }
         .font(.system(size: Layout.chromeSize))
@@ -576,5 +588,10 @@ struct Segments: View {
         .background(Color(PaperTheme.controlFill))
         .roundedFrame(Color(PaperTheme.controlBorder), lineWidth: 1)
         .opacity(isEnabled ? 1 : 0.45)
+        // One stop for the whole control: ← → move the choice.
+        .keyControl(first: first, step: { by in
+            guard let index = options.firstIndex(where: { $0.value == value }) else { return }
+            value = options[min(max(index + by, 0), options.count - 1)].value
+        })
     }
 }

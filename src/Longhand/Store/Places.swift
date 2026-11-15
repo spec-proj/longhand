@@ -89,18 +89,25 @@ final class Places {
 
     /// Scenes and chapters moved or renamed: their places go with them.
     func relocate(_ moves: [(from: URL, to: URL)]) {
-        for move in moves {
-            guard let from = key(move.from), let to = key(move.to) else { continue }
-            for (path, place) in file.places where path == from || path.hasPrefix(from + "/") {
-                file.places[path] = nil
-                file.places[to + path.dropFirst(from.count)] = place
-                dirty = true
-            }
-            if let last = file.last, last == from || last.hasPrefix(from + "/") {
-                file.last = to + last.dropFirst(from.count)
-                dirty = true
-            }
+        let keyed = moves.compactMap { move -> (from: String, to: String)? in
+            guard let from = key(move.from), let to = key(move.to), from != to else { return nil }
+            return (from, to)
         }
+        guard !keyed.isEmpty else { return }
+        // Each path takes the first move that applies, all read from the table as it was: two
+        // scenes swapping places (and names) used to end with one's place on the other.
+        func moved(_ path: String) -> String {
+            for move in keyed where path == move.from || path.hasPrefix(move.from + "/") {
+                return move.to + path.dropFirst(move.from.count)
+            }
+            return path
+        }
+        var places: [String: Place] = [:]
+        for (path, place) in file.places { places[moved(path)] = place }
+        let last = file.last.map(moved)
+        if places.keys.sorted() != file.places.keys.sorted() || last != file.last { dirty = true }
+        file.places = places
+        file.last = last
     }
 
     /// Writes the file if anything changed, asking the editor on screen for its place first.

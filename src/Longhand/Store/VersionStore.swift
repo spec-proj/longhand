@@ -369,7 +369,7 @@ final class VersionStore: ObservableObject {
         guard let root, available else { return done("Git isn’t available for this library.") }
         let owner = account
         let repo = Self.tagName(name)
-        run(root) { root -> String? in
+        runPush(root) { root -> String? in
             GitHub.createPrivateRepository(owner: owner, name: repo, for: root)
         } then: { [weak self] failure in
             self?.remoteRead = false
@@ -387,7 +387,7 @@ final class VersionStore: ObservableObject {
     /// Mac signs in to it the way Git does (an SSH key, or a password kept in Keychain).
     func connectRemote(address: String, done: @escaping @MainActor (String?) -> Void) {
         guard let root, available else { return done("Git isn’t available for this library.") }
-        run(root) { root -> String? in
+        runPush(root) { root -> String? in
             Git.connect(root, to: address)
         } then: { [weak self] failure in
             self?.remoteRead = false
@@ -405,7 +405,7 @@ final class VersionStore: ObservableObject {
     func connectFolder(_ parent: URL, done: @escaping @MainActor (String?) -> Void) {
         guard let root, available else { return done("Git isn’t available for this library.") }
         let name = suggestedRepositoryName
-        run(root) { root -> String? in
+        runPush(root) { root -> String? in
             let made = Git.folderRemote(in: parent, named: name)
             guard let path = made.path else { return made.problem }
             return Git.connect(root, to: path)
@@ -727,6 +727,21 @@ final class VersionStore: ObservableObject {
                                   then: @escaping @MainActor (T) -> Void) {
         busy = true
         queue.async { [weak self] in
+            let result = work(root)
+            Task { @MainActor [weak self] in
+                self?.busy = false
+                then(result)
+            }
+        }
+    }
+
+    /// Runs network operations off the local Git queue, on `pushQueue`, so slow connections never
+    /// block local work or window redraws.
+    private func runPush<T: Sendable>(_ root: URL,
+                                      _ work: @escaping @Sendable (URL) -> T,
+                                      then: @escaping @MainActor (T) -> Void) {
+        busy = true
+        pushQueue.async { [weak self] in
             let result = work(root)
             Task { @MainActor [weak self] in
                 self?.busy = false

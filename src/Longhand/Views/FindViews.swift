@@ -179,6 +179,9 @@ struct QuickOpen: View {
             command("Switch Document…", "⇧⌘L") { store.documentSwitcherShown = true },
             command("Find in Library…", "⇧⌘F") { store.searchShown = true },
             command("Comment on Selection", "⌘J") { Commands.comment(margin: store.margin) },
+            command("Go to Contents", "⌥⌘1") { Panes.focus(.contents, in: store) },
+            command("Go to Margin", "⌥⌘2") { Panes.focus(.margin, in: store) },
+            command("Go to Page", "⌥⌘3") { Panes.focus(.page, in: store) },
         ]
         if store.library?.books.isEmpty == false {
             list.append(command("Export…", "⌘E") { store.exportRequested = true })
@@ -708,6 +711,7 @@ struct KeyField: NSViewRepresentable {
         field.lineBreakMode = .byTruncatingTail
         field.stringValue = text
         field.delegate = context.coordinator
+        field.isPalette = releasesOnSubmit
         field.setContentHuggingPriority(.defaultLow, for: .horizontal)
         field.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         return field
@@ -729,6 +733,8 @@ struct KeyField: NSViewRepresentable {
     }
 
     final class Field: NSTextField {
+        /// The command palette's field (`Panes.settle` doesn't count it once the palette closes).
+        var isPalette = false
         /// What had the keyboard before this field took it.
         private weak var previous: NSResponder?
 

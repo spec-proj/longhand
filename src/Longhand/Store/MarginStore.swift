@@ -898,6 +898,10 @@ final class MarginStore: ObservableObject {
                 }
             }
         }
+        // Folders before what goes inside them. A renamed chapters-only chapter moves its file
+        // and its folder: with the file placed first, the folder's turn found "its"
+        // destination taken and sent it, file and all, to the Trash.
+        staged.sort { $0.destination.pathComponents.count < $1.destination.pathComponents.count }
         for item in staged {
             try? fm.createDirectory(at: item.destination.deletingLastPathComponent(), withIntermediateDirectories: true)
             if fm.fileExists(atPath: item.destination.path) {

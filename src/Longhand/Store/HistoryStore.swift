@@ -51,9 +51,9 @@ final class HistoryStore {
     func keepBeforeWriting(_ scene: URL, newText: String) {
         let now = Date()
         if let last = lastCopied[scene], now.timeIntervalSince(last) < Self.interval { return }
-        if lastCopied[scene] == nil, let newest = versions(of: scene).first,
-           now.timeIntervalSince(newest.date) < Self.interval {
-            lastCopied[scene] = newest.date
+        if lastCopied[scene] == nil, let newest = newestDate(of: scene),
+           now.timeIntervalSince(newest) < Self.interval {
+            lastCopied[scene] = newest
             return
         }
         guard let old = String.prose(at: scene),
@@ -71,6 +71,14 @@ final class HistoryStore {
         try? text.write(to: file, atomically: true, encoding: .utf8)
         lastCopied[scene] = date
         prune(folder)
+    }
+
+    /// When the newest copy was kept, from the files' names alone (`versions(of:)` reads and
+    /// counts every copy: up to 200 files, on the first save of each scene).
+    private func newestDate(of scene: URL) -> Date? {
+        guard let folder = folder(for: scene),
+              let names = try? FileManager.default.contentsOfDirectory(atPath: folder.path) else { return nil }
+        return names.filter { $0.hasSuffix(".md") }.compactMap { Self.stamp.date(from: String($0.prefix(19))) }.max()
     }
 
     /// Newest first.

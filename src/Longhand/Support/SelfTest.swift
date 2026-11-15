@@ -1881,10 +1881,21 @@ enum SelfTest {
                   "shapes: a chapters-only story's chapters each hold one file")
             check(!store.canAddScene && store.canAddChapter, "shapes: a chapters-only story takes chapters, not scenes")
             if let chapter = chaptersOnly?.chapters.last {
+                // Its note goes with it (the folder's move once sent the file's note to the Trash).
+                if let file = chapter.scenes.first {
+                    store.selection = .scene(file.url)
+                    store.margin.setSceneNote("Keep me")
+                    store.margin.saveNow()
+                }
                 store.rename(ManuscriptItem(url: chapter.url, title: chapter.title, order: chapter.order, kind: .chapter), to: "Day Two")
                 let renamed = store.library?.books.first { $0.url == chaptersOnly?.url }?.chapters.last
                 check(renamed?.title == "Day Two" && renamed?.scenes.first?.url.lastPathComponent == "Day Two.md",
                       "shapes: renaming a chapters-only chapter renames its file too")
+                if let file = renamed?.scenes.first {
+                    store.selection = .book(chaptersOnly?.url ?? file.url)
+                    store.selection = .scene(file.url)
+                    check(store.margin.sceneNote == "Keep me", "shapes: a renamed chapters-only chapter keeps its note (\(store.margin.sceneNote))")
+                }
             }
             check(Git.isScene("Story/Document.md") && Git.isScene("Shelf/Story/Document.md") && !Git.isScene("Document.md"),
                   "shapes: Git counts files straight in a story's folder as scenes")
@@ -2912,6 +2923,94 @@ enum SelfTest {
                     try? await Task.sleep(for: .milliseconds(300))
                     check(window.firstResponder === editor, "closing the palette gives the keyboard back to the page")
 
+                    // The keyboard from pane to pane, without the mouse. (An alert left up by an
+                    // earlier check would keep the keyboard, as it should.)
+                    store.errorMessage = nil
+                    try? await Task.sleep(for: .milliseconds(600))
+                    if let book = store.library?.books.first, let chapter = book.chapters.first {
+                        func press(_ code: UInt16, _ flags: NSEvent.ModifierFlags = [], characters: String = "") {
+                            guard let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0,
+                                                               windowNumber: window.windowNumber, context: nil, characters: characters,
+                                                               charactersIgnoringModifiers: characters, isARepeat: false, keyCode: code) else { return }
+                            window.firstResponder?.keyDown(with: event)
+                        }
+                        func pane() -> Pane? { (window.firstResponder as? PaneKeys.KeysView)?.pane }
+                        window.makeFirstResponder(editor)
+
+                        Panes.focus(.contents, in: store)
+                        check(pane() == .contents, "Go › Contents gives the contents the keyboard")
+                        if book.shape == .chaptersAndScenes {
+                            press(123)
+                            check(store.selection == .chapter(chapter.url), "contents: ← goes up to the scene's chapter")
+                            press(123)
+                            press(125)
+                            check(store.selection != .scene(scene.url), "contents: ← closes a chapter, and ↓ then passes its scenes by")
+                            store.selection = .chapter(chapter.url)
+                            press(124); press(124)
+                            check(store.selection == .scene(scene.url), "contents: → opens a chapter and goes into it")
+                            press(126)
+                            check(store.selection == .chapter(chapter.url), "contents: ↑ chooses the row above")
+                            press(125)
+                        }
+                        try? await Task.sleep(for: .milliseconds(500))
+                        check(pane() == .contents, "contents: it keeps the keyboard while the choice moves")
+
+                        // The palette, opened from the contents, gives the keyboard back to it.
+                        store.togglePalette()
+                        try? await Task.sleep(for: .milliseconds(400))
+                        check((window.firstResponder as? NSTextView)?.delegate is KeyField.Field, "palette: it takes the keyboard from the contents")
+                        store.togglePalette()
+                        check(!store.quickOpenShown, "palette: its command a second time puts it away")
+                        try? await Task.sleep(for: .milliseconds(400))
+                        check(pane() == .contents, "palette: closing it gives the keyboard back to the contents")
+
+                        press(48)
+                        check(window.firstResponder === editor, "contents: Tab goes on to the page")
+                        Panes.focus(.margin, in: store)
+                        check(pane() == .margin, "Go › Margin gives the margin the keyboard")
+                        press(48, .shift)
+                        check(window.firstResponder === editor, "margin: ⇧Tab goes back to the page")
+                        Panes.focus(.margin, in: store)
+                        press(53)
+                        check(window.firstResponder === editor, "margin: Escape goes back to the page")
+                        Panes.focus(.contents, in: store)
+                        press(125, .command)
+                        check(window.firstResponder === editor, "contents: ⌘↓ opens the choice on the page")
+
+                        // A page taken away while it had the keyboard: the one in its place gets it.
+                        store.selection = .chapter(chapter.url)
+                        try? await Task.sleep(for: .milliseconds(900))
+                        let held = window.firstResponder as? NSView
+                        check(held != nil && held !== window.contentView && held?.window === window && Panes.current(in: window) == .page,
+                              "the page that replaces one holding the keyboard takes it"
+                                + " (held by \(window.firstResponder.map { String(describing: type(of: $0)) } ?? "nothing")))")
+
+                        // One thing over the page at a time, and the switcher keeps what is typed.
+                        store.selection = .scene(scene.url)
+                        try? await Task.sleep(for: .milliseconds(500))
+                        if let page = window.contentView.flatMap({ findEditor(in: $0) }) {
+                            window.makeFirstResponder(page)
+                            let before = page.string
+                            store.cheatSheetShown = true
+                            store.switcherShown = true
+                            check(!store.cheatSheetShown, "opening the scene switcher puts the cheat sheet away")
+                            try? await Task.sleep(for: .milliseconds(300))
+                            if let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
+                                                            windowNumber: window.windowNumber, context: nil, characters: "x",
+                                                            charactersIgnoringModifiers: "x", isARepeat: false, keyCode: 7) {
+                                NSApp.sendEvent(event)
+                            }
+                            check(page.string == before, "the scene switcher: a letter typed doesn't go into the page behind")
+                            store.quickOpenShown = true
+                            check(!store.switcherShown, "opening the palette puts the scene switcher away")
+                            store.quickOpenShown = false
+                            try? await Task.sleep(for: .milliseconds(300))
+                        }
+                        store.selection = .scene(scene.url)
+                        try? await Task.sleep(for: .milliseconds(400))
+                        window.makeFirstResponder(window.contentView.flatMap({ findEditor(in: $0) }) ?? editor)
+                    }
+
                     // Theme › a theme previews it as it becomes the choice; closing puts the kept one back.
                     let kept = AppTheme.kept
                     if let target = AppTheme.allCases.first(where: { $0 != kept && !$0.darkOnly }),
@@ -2941,6 +3040,7 @@ enum SelfTest {
                     check(false, "the scene editor is on screen for the palette test")
                 }
             }
+
         }
 
         finish()

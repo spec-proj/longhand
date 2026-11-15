@@ -58,6 +58,9 @@ struct ContentView: View {
                             .deskFade(store.deskCleared)
                         }
                         DetailArea()
+                            // Holds the keyboard for a page with no text to hold it (a
+                            // story's contents page, the Library).
+                            .background(PaneKeys(pane: .page, store: store))
                             .background(Color(PaperTheme.paper))
                             .panel(!store.deskCleared)
                             .frame(minWidth: 420, maxWidth: .infinity)
@@ -97,6 +100,11 @@ struct ContentView: View {
                 .toolbarBackground(Color(store.deskCleared ? PaperTheme.paper : PaperTheme.chrome), for: .windowToolbar)
                 .toolbarBackgroundVisibility(.visible, for: .windowToolbar)
             }
+        }
+        // A pane or page that had the keyboard was put away (⌘1, ⌘2, ⌘3, ⌘R): it goes to
+        // what took its place.
+        .onChange(of: [showSidebar, showMargin, showCards, chapterReading, screenplayReading, storyPage]) {
+            Panes.settleSoon(in: store, tries: 6)
         }
         .onGeometryChange(for: CGFloat.self, of: { $0.size.width }) { width in
             if abs(width - windowWidth) > 0.5 { windowWidth = width }
@@ -183,6 +191,10 @@ struct ContentView: View {
                       let book = store.library?.books.first(where: \.isScreenplay), let script = book.document {
                 store.openBook = book.url
                 store.selection = .scene(script.url)
+            }
+            // LONGHAND_PANE=contents|margin|page: that pane has the keyboard (pictures).
+            if let pane = ProcessInfo.processInfo.environment["LONGHAND_PANE"].flatMap(Pane.init(rawValue:)) {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { Panes.focus(pane, in: store) }
             }
             SelfTest.runIfRequested(store: store)
             PerfTest.runIfRequested(store: store)

@@ -56,7 +56,8 @@ struct SidebarView: View {
     @State private var dropTarget: Selection?
     /// The chapter whose end a drag is over.
     @State private var endTarget: URL?
-    @FocusState private var focused: Bool
+    /// The contents has the keyboard (the chosen row is framed).
+    @State private var hasKeys = false
 
     /// Indent per level of the outline (scenes without numbers).
     private let step: CGFloat = 14
@@ -164,28 +165,6 @@ struct SidebarView: View {
                 }
                 .scrollIndicators(.never)
                 .scrollEdgeEffectHidden(true, for: .all)
-                .focusable()
-                .focused($focused)
-                .focusEffectDisabled()
-                .onKeyPress(.upArrow) { moveSelection(by: -1); return .handled }
-                .onKeyPress(.downArrow) { moveSelection(by: 1); return .handled }
-                // The Finder's keys: Return goes into a story in the Library, and renames a
-                // chapter or scene; ⌘⌫ moves the selected item to the Trash (asking first).
-                // Only while the contents has the keyboard, so ⌘⌫ still edits text on the page.
-                .onKeyPress(.return) {
-                    if case .book(let url) = store.selection, store.openBook == nil {
-                        store.openBook = url
-                        return .handled
-                    }
-                    guard let target = selectedItem, target.kind != .book else { return .ignored }
-                    renameTarget = target
-                    return .handled
-                }
-                .onKeyPress(keys: [.delete], phases: .down) { press in
-                    guard press.modifiers == .command, let target = selectedItem else { return .ignored }
-                    deleteTarget = target
-                    return .handled
-                }
                 .onChange(of: store.selection) { _, selection in
                     // Chosen elsewhere (the palette, a card, the path): go into its book and
                     // bring its row into view.
@@ -212,6 +191,10 @@ struct SidebarView: View {
         // One panel, header to foot, the same height as the page and the margin. (The
         // rewrite you're in and a failed backup are in the status bar.)
         .background(Color(PaperTheme.well))
+        // The contents' keys, while it has the keyboard (Go › Contents, or a click on a row).
+        .background(PaneKeys(pane: .contents, store: store, onKey: key, onFocus: { on in
+            if hasKeys != on { hasKeys = on }
+        }))
         .panel()
         .onReceive(store.margin.$sceneURL) { url in
             // Only while the cards show: switching scenes otherwise needn't redraw the contents.
@@ -318,13 +301,14 @@ struct SidebarView: View {
                 words: words,
                 status: status,
                 selected: selected,
+                keyed: selected && hasKeys,
                 collapsed: disclosure?.collapsed,
                 toggle: disclosure?.toggle ?? {},
                 triangle: triangle,
                 numberGap: numberGap
             ),
             tap: { [store] in
-                focused = true
+                takeKeys()
                 if store.selection != tag { store.selection = tag }
             },
             menu: menu
@@ -478,6 +462,7 @@ struct SidebarView: View {
         guard let book = openBook(in: library) else {
             return library.books.filter { $0.folder.map { !collapsedFolders.contains($0) } ?? true }.map { .book($0.url) }
         }
+        if store.contentsTab == .boneyard { return (book.boneyard?.scenes ?? []).map { .scene($0.url) } }
         var rows: [Selection] = [.book(book.url)]
         switch book.shape {
         case .document: return rows
@@ -577,7 +562,7 @@ struct SidebarView: View {
             Rectangle().fill(Color(PaperTheme.hairline)).frame(height: 1)
 
             Button {
-                focused = true
+                takeKeys()
                 // A single document: the card opens it. Otherwise the story's page or cards.
                 if let document = book.document {
                     if store.selection != .scene(document.url) { store.selection = .scene(document.url) }
@@ -624,7 +609,8 @@ struct SidebarView: View {
             .buttonStyle(.plain)
             .help(book.shape == .document ? "Open the document" : "Show the story as cards")
             .frame(maxWidth: .infinity, alignment: .leading)
-            .rowBackground(selected || (book.document.map { store.selection == .scene($0.url) } ?? false) ? Color(PaperTheme.selection) : .clear)
+            .rowBackground(selected || (book.document.map { store.selection == .scene($0.url) } ?? false) ? Color(PaperTheme.selection) : .clear,
+                           framed: hasKeys && (selected || (book.document.map { store.selection == .scene($0.url) } ?? false)))
             .padding(.vertical, 4)
             .contextMenu { bookMenu(book) }
         }
@@ -673,6 +659,7 @@ struct SidebarView: View {
             words: store.wordCount(of: book),
             pages: book.document.flatMap { $0.isScreenplay ? store.pages(of: $0) : nil },
             selected: store.selection == .book(book.url),
+            keyed: hasKeys && store.selection == .book(book.url),
             cover: cover(of: book),
             enter: { store.openBook = book.url }
         )
@@ -682,7 +669,7 @@ struct SidebarView: View {
         // row's ›, or Return) goes into the book. One gesture, reading the click count, so a
         // single click isn't held back waiting to see if a second follows.
         .onTapGesture {
-            focused = true
+            takeKeys()
             if store.selection != .book(book.url) { store.selection = .book(book.url) }
             if (NSApp.currentEvent?.clickCount ?? 1) >= 2 { store.openBook = book.url }
         }
@@ -727,6 +714,64 @@ struct SidebarView: View {
     }
 
     /// ↑ and ↓ move the selection through the rows on show.
+    private func takeKeys() {
+        Panes.active = .contents
+        if let keys = Panes.keysView(.contents) { keys.window?.makeFirstResponder(keys) }
+    }
+
+    /// The contents' keys. ↑ ↓ move the choice; → opens a chapter (or goes into a story in
+    /// the Library) and ← closes it (or goes up to what holds the choice); the Finder's keys:
+    /// Return renames (in the Library, goes into the story), ⌘⌫ moves to the Trash (asking
+    /// first), ⌘↓ opens the choice on the page, ⌘↑ goes up to the Library.
+    private func key(_ event: NSEvent) -> Bool {
+        let flags = event.modifierFlags.intersection([.command, .option, .control, .shift])
+        let inLibrary = store.openBook == nil
+        switch event.keyCode {
+        case 126 where flags.isEmpty: moveSelection(by: -1)
+        case 125 where flags.isEmpty: moveSelection(by: 1)
+        case 126 where flags == .command:
+            guard !inLibrary else { return false }
+            store.showLibrary()
+        case 125 where flags == .command:
+            if inLibrary, case .book(let url) = store.selection { store.openBook = url } else { Panes.focus(.page, in: store) }
+        case 124 where flags.isEmpty:
+            switch store.selection {
+            case .book(let url) where inLibrary: store.openBook = url
+            case .chapter(let url):
+                if collapsedChapters.contains(url) { collapsedChapters.remove(url) } else { moveSelection(by: 1) }
+            default: return false
+            }
+        case 123 where flags.isEmpty:
+            switch store.selection {
+            case .chapter(let url) where !collapsedChapters.contains(url) && store.chapter(for: url)?.scenes.isEmpty == false
+                && store.book(for: url.deletingLastPathComponent().canonical)?.shape == .chaptersAndScenes:
+                collapsedChapters.insert(url)
+            case .scene(let url):
+                // Up to its chapter, where it has one in the contents.
+                guard let place = store.location(ofScene: url), place.book.shape == .chaptersAndScenes,
+                      !place.chapter.boneyard else { return false }
+                store.selection = .chapter(place.chapter.url)
+            case .book where !inLibrary: store.showLibrary()
+            default: return false
+            }
+        case 36, 76:
+            guard flags.isEmpty else { return false }
+            if case .book(let url) = store.selection, inLibrary {
+                store.openBook = url
+            } else if let target = selectedItem, target.kind != .book {
+                renameTarget = target
+            } else {
+                return false
+            }
+        case 51 where flags == .command:
+            guard let target = selectedItem else { return false }
+            deleteTarget = target
+        default:
+            return false
+        }
+        return true
+    }
+
     private func moveSelection(by step: Int) {
         let rows = visibleRows
         guard !rows.isEmpty else { return }
@@ -768,7 +813,7 @@ struct SidebarView: View {
     /// heading to the top of the page, with the caret at its end.
     private func headingRow(_ heading: OutlineHeading, in document: URL) -> some View {
         Button {
-            focused = true
+            takeKeys()
             goTo(heading, in: document)
         } label: {
             HStack(spacing: 0) {
@@ -968,7 +1013,7 @@ struct SidebarView: View {
         let cut = store.margin.info(for: scene.url).cut
         let detail = cut?.number ?? cut.map { $0.date.formatted(.dateTime.day().month(.abbreviated)) }
         return Button {
-            focused = true
+            takeKeys()
             if !selected { store.selection = .scene(scene.url) }
         } label: {
             HStack(spacing: 8) {
@@ -988,7 +1033,7 @@ struct SidebarView: View {
             .padding(.leading, Layout.pad)
             .padding(.trailing, Layout.pad)
             .frame(height: 24)
-            .rowBackground(Color(selected ? PaperTheme.selection : .clear))
+            .rowBackground(Color(selected ? PaperTheme.selection : .clear), framed: selected && hasKeys)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -1202,7 +1247,7 @@ private struct RowShell<Menu: View>: View, Equatable {
 
     var body: some View {
         row
-            .rowBackground(row.selected ? Color(PaperTheme.selection) : Color.clear)
+            .rowBackground(row.selected ? Color(PaperTheme.selection) : Color.clear, framed: row.keyed)
             .contentShape(Rectangle())
             .onTapGesture(perform: tap)
             .contextMenu(menuItems: menu)
@@ -1226,6 +1271,8 @@ private struct OutlineRow: View, Equatable {
     let words: Int?
     let status: SceneInfo.Status?
     let selected: Bool
+    /// The chosen row while the contents has the keyboard: framed.
+    var keyed = false
     /// Nil for a row without a disclosure triangle (a scene).
     let collapsed: Bool?
     let toggle: () -> Void
@@ -1234,7 +1281,7 @@ private struct OutlineRow: View, Equatable {
 
     static func == (a: OutlineRow, b: OutlineRow) -> Bool {
         a.leading == b.leading && a.number == b.number && a.numberWidth == b.numberWidth && a.title == b.title && a.weight == b.weight
-            && a.count == b.count && a.comments == b.comments && a.change == b.change && a.selected == b.selected
+            && a.count == b.count && a.comments == b.comments && a.change == b.change && a.selected == b.selected && a.keyed == b.keyed
             && a.words == b.words && a.collapsed == b.collapsed && a.status == b.status
     }
 
@@ -1321,6 +1368,7 @@ private struct LibraryRow: View, Equatable {
     /// A screenplay's length, shown instead of its words.
     var pages: Int? = nil
     let selected: Bool
+    var keyed = false
     /// The book's cover, if it has one.
     let cover: NSImage?
     var enter: () -> Void = {}
@@ -1331,7 +1379,7 @@ private struct LibraryRow: View, Equatable {
     }
 
     static func == (a: LibraryRow, b: LibraryRow) -> Bool {
-        a.title == b.title && a.look == b.look && a.words == b.words && a.pages == b.pages && a.selected == b.selected && a.cover === b.cover
+        a.title == b.title && a.look == b.look && a.words == b.words && a.pages == b.pages && a.selected == b.selected && a.keyed == b.keyed && a.cover === b.cover
     }
 
     /// The Library's own row, larger than the rows inside a book: the cover (or its initial),
@@ -1373,7 +1421,7 @@ private struct LibraryRow: View, Equatable {
         .padding(.trailing, 8)
         .padding(.vertical, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .rowBackground(selected ? Color(PaperTheme.selection) : Color.clear)
+        .rowBackground(selected ? Color(PaperTheme.selection) : Color.clear, framed: keyed)
     }
 }
 

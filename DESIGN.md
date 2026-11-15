@@ -403,6 +403,9 @@ commit: Save Version, a draft, or the automatic one on quitting.
   Smaller Text, the cheat sheet, Export, Settings, and "Theme: …" for each theme. Titles that start with the
   text come first, then ones containing it, then ones with its letters in order. Arrows,
   Return, Escape.
+- **⌘K again closes the palette.** The palette, the switchers and the cheat sheet never stack:
+  opening one puts the others away. The switchers keep what is typed (it used to reach the
+  page behind).
 - **Find in Library (⇧⌘F):** the contents column becomes a search: a framed field with the
   number of matches and a close button, then matches grouped by scene (title and chapter), each
   a line of context with the match in semibold ink. Case- and accent-insensitive. Choosing one
@@ -662,3 +665,28 @@ View menu, for the scene editor and the chapter page alike; remembered between l
 
 - Dragging to resize the side columns.
 - A reading mode (symbols hidden, justified, hyphenated).
+
+## Keyboard
+
+Everything can be reached without the mouse (owner, 2026-11-14).
+
+- **Three panes hold the keyboard:** the contents, the page (or its cards), the margin.
+  Go › Contents ⌥⌘1, Margin ⌥⌘2, Page ⌥⌘3: the numbers that show and hide the contents (⌘1)
+  and the margin (⌘2) and flip page and cards (⌘3). A hidden pane is shown first. From the
+  contents, the cards or the margin, Tab and ⇧Tab go to the next pane on screen and Escape
+  goes back to the page (Tab on the page still types a tab).
+- **Which pane has it:** the page shows its caret; in the contents the chosen row's band
+  gains a hairline frame (`controlOnBorder`), in the margin the chosen tab does. Never the
+  system focus ring.
+- **Contents:** ↑ ↓ choose; → opens a chapter, then goes into it (in the Library, into the
+  story); ← closes a chapter, or goes up from a scene to its chapter, from the story to the
+  Library; Return renames (in the Library, goes in); ⌘↓ opens the choice on the page; ⌘↑ the
+  Library; ⌘⌫ Trash.
+- **Margin:** ← → change tab; on Comments ↑ ↓ go through the comments (each passage comes
+  into view), Return edits the chosen one; on Notes Return goes into the note.
+- **The keyboard is never left with nothing.** When what held it goes (a palette command
+  that changed the page, ⌘3, a pane hidden), it goes to the pane that had it last, else the page.
+- **Settings:** every control is a stop for Tab and ⇧Tab whatever the Mac's own Keyboard
+  navigation setting; Space or Return presses, ← → step segments (the panes first, which
+  have the keyboard as the window opens). The control with the keyboard is framed in the
+  accent, 1.5pt, as a field being typed in is.

@@ -69,6 +69,14 @@ final class HighlightTextView: NSTextView {
         NotificationCenter.default.removeObserver(self, name: PageMarks.changed, object: nil)
         guard window != nil else { return }
         NotificationCenter.default.addObserver(self, selector: #selector(marksChanged), name: PageMarks.changed, object: nil)
+        // Takes the keyboard if the page it replaces had it.
+        Panes.pageArrived()
+    }
+
+    override func becomeFirstResponder() -> Bool {
+        let took = super.becomeFirstResponder()
+        if took { Panes.active = .page }
+        return took
     }
 
     @objc private func marksChanged() { needsDisplay = true }

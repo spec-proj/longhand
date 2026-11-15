@@ -203,7 +203,6 @@ private struct CardBoard: View {
     let kind: CardBoardKind
     let book: Book
 
-    @FocusState private var focused: Bool
     /// The card being edited on the board, and what has been typed.
     @State private var editing: URL?
     @State private var draftTitle = ""
@@ -261,12 +260,10 @@ private struct CardBoard: View {
                         columnsBoard(lists)
                     }
                 }
-                .focusable()
-                .focused($focused)
-                .focusEffectDisabled()
-                .onKeyPress(keys: [.upArrow, .downArrow, .leftArrow, .rightArrow, .return, .delete], phases: .down) { press in
-                    keyPressed(press, lists: lists, columns: gridColumns(geometry.size.width), proxy: proxy)
-                }
+                // The board's keys, while it has the keyboard (a click on it, or Go › Page).
+                .background(PaneKeys(pane: .page, priority: 1, store: store, onKey: { event in
+                    keyPressed(event, lists: lists, columns: gridColumns(geometry.size.width), proxy: proxy)
+                }))
             }
         }
         .background(Color(PaperTheme.paper))
@@ -348,7 +345,7 @@ private struct CardBoard: View {
         }
         .scrollIndicators(.never)
         .contentShape(Rectangle())
-        .onTapGesture { finishEditing(); focused = true }
+        .onTapGesture { finishEditing(); takeKeys() }
         // The empty part of the board: dropped cards go last.
         .dropDestination(for: String.self) { payloads, _ in
             guard let payload = payloads.first else { return false }
@@ -407,7 +404,7 @@ private struct CardBoard: View {
             .scrollIndicators(.never, axes: .vertical)
         }
         .contentShape(Rectangle())
-        .onTapGesture { finishEditing(); focused = true }
+        .onTapGesture { finishEditing(); takeKeys() }
     }
 
     private func column(_ chapter: Chapter, items: [CardItem], number: Int?, chapters: [URL]) -> some View {
@@ -465,11 +462,11 @@ private struct CardBoard: View {
             onDrop: { drop($0, on: item, in: list) },
             onClick: { count in
                 if editing != nil, editing != item.id { finishEditing() }
-                focused = true
+                takeKeys()
                 if count >= 2 { open(item) } else { select(item) }
             },
             onCommit: finishEditing,
-            onCancel: { editing = nil; focused = true },
+            onCancel: { editing = nil; takeKeys() },
             onEnd: { if editing == item.id { finishEditing() } }
         )
         .id(item.id)
@@ -562,7 +559,7 @@ private struct CardBoard: View {
     private func finishEditing() {
         guard let url = editing else { return }
         editing = nil
-        focused = true
+        takeKeys()
         guard let item = lists.flatMap(\.items).first(where: { $0.id == url }) else { return }
         var info = margin.info(for: url)
         let synopsis = draftSynopsis.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -576,35 +573,45 @@ private struct CardBoard: View {
 
     // MARK: Keys
 
-    private func keyPressed(_ press: KeyPress, lists: [(chapter: Chapter, items: [CardItem])], columns: Int, proxy: ScrollViewProxy) -> KeyPress.Result {
-        guard editing == nil else { return .ignored }
-        let modifiers = press.modifiers.intersection([.command, .shift, .option, .control])
+    private func takeKeys() {
+        Panes.active = .page
+        if let keys = Panes.keysView(.page) { keys.window?.makeFirstResponder(keys) }
+    }
+
+    /// The board's keys: arrows move the choice, Return edits the card, ⌘↓ opens its scene,
+    /// ⌘⌫ moves it to the Trash (asking first). True when the key was used.
+    private func keyPressed(_ event: NSEvent, lists: [(chapter: Chapter, items: [CardItem])], columns: Int, proxy: ScrollViewProxy) -> Bool {
+        guard editing == nil else { return false }
+        let modifiers = event.modifierFlags.intersection([.command, .shift, .option, .control])
         let all = lists.flatMap(\.items)
         let current = all.first { $0.id == margin.sceneURL }
-        switch press.key {
-        case .return:
-            guard let current, modifiers.isEmpty else { return .ignored }
+        let code = event.keyCode
+        switch code {
+        case 36, 76:
+            guard let current, modifiers.isEmpty else { return false }
             edit(current)
-            return .handled
-        case .delete:
-            guard let current, modifiers == .command else { return .ignored }
+            return true
+        case 51:
+            guard let current, modifiers == .command else { return false }
             trashTarget = current.manuscriptItem
-            return .handled
-        case .downArrow where modifiers == .command:
-            guard let current else { return .ignored }
+            return true
+        case 125 where modifiers == .command:
+            guard let current else { return false }
             open(current)
-            return .handled
+            return true
+        case 123...126:
+            guard modifiers.isEmpty else { return false }
         default:
-            guard modifiers.isEmpty else { return .ignored }
+            return false
         }
-        let dx = press.key == .leftArrow ? -1 : press.key == .rightArrow ? 1 : 0
-        let dy = press.key == .upArrow ? -1 : press.key == .downArrow ? 1 : 0
+        let dx = code == 123 ? -1 : code == 124 ? 1 : 0
+        let dy = code == 126 ? -1 : code == 125 ? 1 : 0
         guard let next = CardDrag.neighbour(of: current?.id, dx: dx, dy: dy, lists: lists.map { $0.items.map(\.id) },
                                         gridColumns: isGrid ? columns : nil),
-              let item = all.first(where: { $0.id == next }) else { return .handled }
+              let item = all.first(where: { $0.id == next }) else { return true }
         select(item)
         proxy.scrollTo(item.id)
-        return .handled
+        return true
     }
 
     // MARK: Drops

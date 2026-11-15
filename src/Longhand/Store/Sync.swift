@@ -307,6 +307,7 @@ extension VersionStore {
                 if wasBehind, self.sync.problem != .diverged {
                     // The files change under the editor: the library store saves first and
                     // re-reads afterwards.
+                    self.sync.begin(.pulling)
                     self.pullRequested?()
                 }
                 // Behind: the pull pushes when it has finished (a push now would be rejected,
@@ -341,13 +342,20 @@ extension VersionStore {
 
     enum PullOutcome: Equatable { case upToDate, updated, conflict, failed }
 
+    func endPulling() { sync.end(.pulling) }
+
     /// Brings the remote's commits into the open branch. Runs before returning (the files
     /// change), after `LibraryStore` has saved; true when files changed and must be re-read.
     /// Fast-forwards when this Mac has nothing new; otherwise replays this Mac's commits on
     /// top of the remote's (`rebase`). If the two changed the same lines, nothing is touched
     /// and the state becomes `.diverged`.
     func pull() -> PullOutcome {
-        guard let root, available else { return .failed }
+        guard let root, available else {
+            sync.end(.pulling)
+            return .failed
+        }
+        if !sync.isRunning(.pulling) { sync.begin(.pulling) }
+        defer { sync.end(.pulling) }
         let (outcome, steps) = queue.sync { Git.pull(root, message: Self.autoMessage()) }
         for step in steps { sync.record(step.command, step.result) }
         switch outcome {
@@ -425,6 +433,10 @@ extension VersionStore {
     }
 
     func resetSync() {
+        // A push still under way belongs to the library just closed; its end is ignored, so
+        // say here that none is running (left set, nothing was pushed again until quitting).
+        if backingUp { setPushing(false) }
+        sync.end(.pulling)
         commitTask?.cancel()
         dirtySince = nil
         pushAgain = false

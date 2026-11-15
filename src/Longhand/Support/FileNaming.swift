@@ -50,6 +50,11 @@ extension String {
     /// file can't be read at all.
     static func prose(at url: URL) -> String? {
         guard let data = try? Data(contentsOf: url) else { return nil }
+        return prose(data: data)
+    }
+
+    /// The same reading of a file's bytes from anywhere else (a scene as Git kept it).
+    static func prose(data: Data) -> String? {
         if let text = String(data: data, encoding: .utf8) { return text }
         var converted: NSString?
         let found = NSString.stringEncoding(for: data, encodingOptions: [.allowLossyKey: false],

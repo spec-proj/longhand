@@ -213,7 +213,9 @@ struct SceneSwitcher: View {
             move(flags.contains(.shift) && !documents ? -1 : 1)
             return true
         }
-        return false
+        // Anything else typed stays here: it used to go into the page behind. ⌘ keys go on
+        // to the menus.
+        return !flags.contains(.command)
     }
 
     private func open() {
@@ -263,7 +265,7 @@ private struct KeyCatcher: NSViewRepresentable {
                     }
                     return event
                 }
-                guard event.window === window else { return event }
+                guard event.window === window || event.windowNumber == window.windowNumber else { return event }
                 return self.onKey(event) ? nil : event
             }
         }

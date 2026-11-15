@@ -13,6 +13,8 @@ final class LibraryStore: ObservableObject {
                 if recentScenes.count > 16 { recentScenes.removeLast() }
             }
             selectionChanged(from: oldValue)
+            // The page that had the keyboard may be on its way out: give it to the new one.
+            Panes.settleSoon(in: self, tries: 6)
             places.opened(selection)
             enterBook(of: selection)
             // The contents column shows the tab that holds what's open.
@@ -349,17 +351,20 @@ final class LibraryStore: ObservableObject {
     /// a moment, so it never runs mid-sentence or while a merge is being chosen.
     func pullRemote() {
         pullTask?.cancel()
-        let busy = Date().timeIntervalSince(lastEdit) < pullPause || saveState == .edited || saveState == .saving
-            || versions.mergePlan != nil
+        let paused = pullPause > 0 && Date().timeIntervalSince(lastEdit) < pullPause
+        let busy = paused || saveState == .edited || saveState == .saving || versions.mergePlan != nil
         guard !busy else {
             pullTask = Task { @MainActor [weak self] in
-                try? await Task.sleep(for: .seconds(max(0.2, self?.pullPause ?? 3)))
+                try? await Task.sleep(for: .seconds(max(0.05, self?.pullPause ?? 3)))
                 guard !Task.isCancelled else { return }
                 self?.pullRemote()
             }
             return
         }
-        guard saveEverything() else { return }
+        guard saveEverything() else {
+            versions.endPulling()
+            return
+        }
         historyPreview = nil
         if versions.pull() == .updated { filesReplaced() }
     }
@@ -701,6 +706,9 @@ final class LibraryStore: ObservableObject {
     func saveNow() {
         saveTask?.cancel()
         saveTask = nil
+        // Notes and comments first, whether or not the prose changed: a note typed just before
+        // quitting, with no edit to the scene, was never written. (Nothing to write: no work.)
+        margin.saveNow()
         guard saveState == .edited else { return }
         saveState = .saving
         var failed = false
@@ -730,7 +738,6 @@ final class LibraryStore: ObservableObject {
         }
 
         if counts != wordCounts { wordCounts = counts }
-        margin.saveNow()
 
         if failed {
             saveState = .edited
@@ -1710,41 +1717,33 @@ final class LibraryStore: ObservableObject {
     /// ⌘P and ⇧⌘F.
     @Published var quickOpenShown = false {
         didSet {
-            guard oldValue, !quickOpenShown else { return }
-            palette.finish()
-            // A previewed theme drew the window again, so the page the palette took the
-            // keyboard from is gone: give it to the new page if nothing has it. The new window
-            // contents can take a moment on a busy Mac (the keyboard once went to the old page
-            // as it was taken away), so look again for up to a second and a half.
-            refocusPage(tries: 25)
-        }
-    }
-    private func refocusPage(tries: Int) {
-        DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(60)) { [weak self] in
-            guard let self else { return }
-            let window = NSApp.mainWindow ?? NSApp.windows.first { $0.frame.width > 400 }
-            guard let window else { return }
-            // Act only when nothing on screen has the keyboard: nothing, the window, a page
-            // taken away, or the closing palette's own field (it can hold the keyboard for a
-            // moment, then leaves with nothing holding it). Something else on screen (the
-            // page, a field, the contents column) keeps it.
-            let held = window.firstResponder
-            let palette = (held as? NSTextView)?.isFieldEditor == true && (held as? NSTextView)?.delegate is KeyField.Field
-            let onScreen = (held as? NSView).map { $0 !== window.contentView && $0.window === window && !$0.isHiddenOrHasHiddenAncestor } ?? false
-            if palette || !onScreen, let page = window.contentView.flatMap(Self.editablePage) {
-                window.makeFirstResponder(page)
+            guard oldValue != quickOpenShown else { return }
+            if quickOpenShown {
+                // One thing over the page at a time; and remember which pane had the keyboard.
+                closeOverlays(except: \.quickOpenShown)
+                Panes.settle(in: self)
+                return
             }
-            // Keep looking for the whole time, even after handing it over: the page given it
-            // may be the old one, about to be taken away by the redraw (that left the
-            // keyboard with nothing, now and then, on a busy Mac).
-            if tries > 1 { self.refocusPage(tries: tries - 1) }
+            palette.finish()
+            // The keyboard goes back to the pane it came from. What had it may be gone (the
+            // command changed the page; a previewed theme drew the window again), and on a
+            // busy Mac the new page can take a moment, so look again for a second and a half.
+            Panes.settleSoon(in: self, tries: 25)
         }
     }
-    /// The first page that takes typing in a view tree.
-    private static func editablePage(in view: NSView) -> NSTextView? {
-        if let page = view as? HighlightTextView, page.isEditable, !page.isHiddenOrHasHiddenAncestor { return page }
-        for child in view.subviews { if let page = editablePage(in: child) { return page } }
-        return nil
+
+    /// ⌘K: opens the palette, or puts it away. Not over a sheet.
+    func togglePalette() {
+        if !quickOpenShown, NSApp.keyWindow?.isSheet == true || NSApp.mainWindow?.attachedSheet != nil { return }
+        quickOpenShown.toggle()
+    }
+
+    /// The palette, the switchers and the cheat sheet don't stack: opening one closes the rest.
+    private func closeOverlays(except keep: ReferenceWritableKeyPath<LibraryStore, Bool>) {
+        for overlay in [\LibraryStore.quickOpenShown, \.switcherShown, \.documentSwitcherShown, \.cheatSheetShown]
+        where overlay != keep && self[keyPath: overlay] {
+            self[keyPath: overlay] = false
+        }
     }
 
     /// What the palette holds (its group, query, choice), kept here so a theme previewed from
@@ -1765,11 +1764,15 @@ final class LibraryStore: ObservableObject {
     /// selected in the Library shows its Book Info page; inside it, the whole book as cards.
     @Published var openBook: URL?
     /// ⌘L, the scene switcher (`SceneSwitcher`).
-    @Published var switcherShown = false
+    @Published var switcherShown = false {
+        didSet { if switcherShown, !oldValue { closeOverlays(except: \.switcherShown) } }
+    }
     /// Scenes opened, most recent first (the scene switcher's order).
     private(set) var recentScenes: [URL] = []
     /// ⇧⌘L, the document switcher (`SceneSwitcher(documents: true)`): every story.
-    @Published var documentSwitcherShown = false
+    @Published var documentSwitcherShown = false {
+        didSet { if documentSwitcherShown, !oldValue { closeOverlays(except: \.documentSwitcherShown) } }
+    }
 
     /// Back to the Library (‹ Library, ⌘4, the path's first place): the story you were in is
     /// chosen there, its page shown, rather than its text staying open beside the list

@@ -33,3 +33,16 @@ codesign --force --sign - "dist/Longhand Test.app"
 
 echo
 echo "Built dist/Longhand.app (and dist/Longhand Test.app for test runs)"
+
+# The copy the owner opens is the one in Applications (owner, 2026-11-15): put the new build
+# there, unless Longhand is open (it is never closed for them). LONGHAND_NO_INSTALL=1 skips it.
+installed="/Applications/Longhand.app"
+if [[ -d "$installed" && -z "${LONGHAND_NO_INSTALL:-}" ]]; then
+    if pgrep -f "$installed/Contents/MacOS/Longhand" >/dev/null; then
+        echo "Longhand is open: $installed was left as it is. Quit Longhand and build again to update it."
+    else
+        rm -rf "$installed.new"
+        ditto dist/Longhand.app "$installed.new" && rm -rf "$installed" && mv "$installed.new" "$installed"
+        echo "Updated $installed"
+    fi
+fi

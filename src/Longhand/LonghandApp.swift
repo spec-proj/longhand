@@ -132,6 +132,18 @@ struct LonghandApp: App {
                     .keyboardShortcut("l", modifiers: [.command, .shift])
                     .disabled(store.library?.books.isEmpty ?? true)
                 Divider()
+                // The keyboard, from pane to pane: the numbers are the ones that show and
+                // hide the contents (1) and the margin (2) and flip the page and cards (3).
+                Button("Contents") { Panes.focus(.contents, in: store) }
+                    .keyboardShortcut("1", modifiers: [.option, .command])
+                    .disabled(store.library == nil)
+                Button("Margin") { Panes.focus(.margin, in: store) }
+                    .keyboardShortcut("2", modifiers: [.option, .command])
+                    .disabled(store.library == nil)
+                Button("Page") { Panes.focus(.page, in: store) }
+                    .keyboardShortcut("3", modifiers: [.option, .command])
+                    .disabled(store.library == nil)
+                Divider()
                 Button("Previous Scene") { store.stepScene(by: -1) }
                     .keyboardShortcut(.upArrow, modifiers: [.control, .command])
                 Button("Next Scene") { store.stepScene(by: 1) }
@@ -143,7 +155,7 @@ struct LonghandApp: App {
                     .keyboardShortcut(.downArrow, modifiers: [.option, .command])
             }
             CommandGroup(after: .textEditing) {
-                Button("Command Palette…") { store.quickOpenShown = true }
+                Button("Command Palette…") { store.togglePalette() }
                     .keyboardShortcut("k", modifiers: .command)
                     .disabled(store.library == nil)
                 Button("Find in Library…") { store.searchShown = true }

@@ -99,8 +99,11 @@ extension View {
     }
 
     /// A selected or hovered row, Mac sidebar style: a rounded band inset from the panel's edges.
-    func rowBackground(_ colour: Color) -> some View {
-        background(rounded(Layout.rowRadius).fill(colour).padding(.horizontal, 6))
+    /// `framed`: the chosen row of a list that has the keyboard, a hairline round its band.
+    func rowBackground(_ colour: Color, framed: Bool = false) -> some View {
+        background(rounded(Layout.rowRadius).fill(colour)
+            .overlay(rounded(Layout.rowRadius).strokeBorder(Color(PaperTheme.controlOnBorder), lineWidth: framed ? 1 : 0))
+            .padding(.horizontal, 6))
     }
 }
 
@@ -170,5 +173,187 @@ extension View {
             .frame(minWidth: height, minHeight: height, maxHeight: height)
             .background(Color(PaperTheme.controlFill), in: rounded(Layout.smallRadius + 1))
             .overlay(rounded(Layout.smallRadius + 1).strokeBorder(Color(PaperTheme.controlBorder), lineWidth: 1))
+    }
+}
+
+// MARK: - Controls worked from the keyboard (Settings)
+
+/// The controls of a window that is worked from the keyboard, in reading order, and which
+/// one has the keyboard. The window's keys come here through a monitor (`KeyStopsMonitor`):
+/// Tab and ⇧Tab move, Space or Return presses, ← → step segments, Escape closes the window.
+/// (SwiftUI's own focus was tried first: in the real Settings window Tab did nothing.)
+@MainActor
+final class KeyStops: ObservableObject {
+    @Published var current: UUID?
+    struct Stop {
+        var press: (() -> Void)?
+        var step: ((Int) -> Void)?
+        var enabled = true
+        var first = false
+    }
+    var stops: [UUID: Stop] = [:]
+    var frames: [UUID: CGRect] = [:] {
+        didSet { if current == nil || !ordered.contains(current!) { current = ordered.first { stops[$0]?.first == true } ?? ordered.first } }
+    }
+
+    /// Top to bottom, then left to right (controls on one row share a top within a few points).
+    var ordered: [UUID] {
+        frames.filter { stops[$0.key]?.enabled == true }
+            .sorted { a, b in
+                abs(a.value.midY - b.value.midY) > 8 ? a.value.midY < b.value.midY : a.value.minX < b.value.minX
+            }
+            .map(\.key)
+    }
+
+    func move(_ by: Int) {
+        let list = ordered
+        guard !list.isEmpty else { return }
+        let index = current.flatMap { list.firstIndex(of: $0) }
+        current = list[((index ?? (by > 0 ? -1 : 0)) + by + list.count) % list.count]
+    }
+
+    /// True when the key was used.
+    func key(_ event: NSEvent, in window: NSWindow) -> Bool {
+        let flags = event.modifierFlags.intersection([.command, .option, .control, .shift])
+        let typing = (window.firstResponder as? NSTextView) != nil
+        switch event.keyCode {
+        case 53 where flags.isEmpty:                     // Escape: out of a field, else close
+            if typing { window.makeFirstResponder(nil); if current == nil { move(1) } } else { window.performClose(nil) }
+        case 48 where flags.isEmpty || flags == .shift:  // Tab, ⇧Tab
+            let by = flags == .shift ? -1 : 1
+            let list = ordered
+            if typing {
+                // Among the fields; from the first or last of them, back to the controls.
+                let before = window.firstResponder
+                if by > 0 { window.selectNextKeyView(nil) } else { window.selectPreviousKeyView(nil) }
+                if window.firstResponder === before || !(window.firstResponder is NSTextView) {
+                    window.makeFirstResponder(nil)
+                    current = by > 0 ? list.first : list.last
+                }
+                return true
+            }
+            // Past the last control: into the pane's text fields, if it has any.
+            if let current, by > 0 ? current == list.last : current == list.first, let content = window.contentView {
+                if by > 0 { window.selectKeyView(following: content) } else { window.selectKeyView(preceding: content) }
+                if window.firstResponder is NSTextView { self.current = nil; return true }
+            }
+            move(by)
+        case 49, 36, 76:                                 // Space, Return, Enter
+            guard !typing, flags.isEmpty, let current, let press = stops[current]?.press else { return false }
+            press()
+        case 123, 124:                                   // ← →
+            guard !typing, flags.isEmpty, let current, let step = stops[current]?.step else { return false }
+            step(event.keyCode == 124 ? 1 : -1)
+        default:
+            return false
+        }
+        return true
+    }
+}
+
+private struct KeyStopsKey: EnvironmentKey { static let defaultValue: KeyStops? = nil }
+private struct StopFrames: PreferenceKey {
+    static let defaultValue: [UUID: CGRect] = [:]
+    static func reduce(value: inout [UUID: CGRect], nextValue: () -> [UUID: CGRect]) { value.merge(nextValue()) { $1 } }
+}
+
+extension EnvironmentValues {
+    /// Set in Settings; nil in the main window, where controls are left to the mouse.
+    var keyStops: KeyStops? {
+        get { self[KeyStopsKey.self] }
+        set { self[KeyStopsKey.self] = newValue }
+    }
+}
+
+extension View {
+    /// A control worked from the keyboard, where the window has `keyStops`.
+    func keyControl(radius: CGFloat = Layout.radius, first: Bool = false,
+                    step: ((Int) -> Void)? = nil, action: (() -> Void)? = nil) -> some View {
+        modifier(KeyControl(radius: radius, first: first, step: step, action: action))
+    }
+
+    /// Makes a window's controls keyboard stops: put on the window's root view.
+    func keyStops(_ stops: KeyStops) -> some View {
+        environment(\.keyStops, stops)
+            .coordinateSpace(name: "keyStops")
+            .onPreferenceChange(StopFrames.self) { frames in
+                DispatchQueue.main.async { if stops.frames != frames { stops.frames = frames } }
+            }
+            .background(KeyStopsMonitor(stops: stops))
+    }
+}
+
+private struct KeyControl: ViewModifier {
+    let radius: CGFloat
+    let first: Bool
+    let step: ((Int) -> Void)?
+    let action: (() -> Void)?
+    @Environment(\.keyStops) private var stops
+    @Environment(\.isEnabled) private var isEnabled
+
+    func body(content: Content) -> some View {
+        if let stops {
+            KeyStopView(stops: stops, radius: radius,
+                        stop: KeyStops.Stop(press: action, step: step, enabled: isEnabled, first: first), content: content)
+        } else {
+            content
+        }
+    }
+}
+
+private struct KeyStopView<Content: View>: View {
+    @ObservedObject var stops: KeyStops
+    let radius: CGFloat
+    let stop: KeyStops.Stop
+    let content: Content
+    @State private var id = UUID()
+
+    var body: some View {
+        // Its handlers as they are now (they hold the control's current values).
+        let _ = (stops.stops[id] = stop)
+        content
+            .overlay(rounded(radius + 2).strokeBorder(Color(PaperTheme.accent), lineWidth: stops.current == id ? 1.5 : 0).padding(-3))
+            .background(GeometryReader { geometry in
+                Color.clear.preference(key: StopFrames.self, value: [id: geometry.frame(in: .named("keyStops"))])
+            })
+            .onDisappear { stops.stops[id] = nil }
+    }
+}
+
+/// Hands the window's keys to its `KeyStops`.
+private struct KeyStopsMonitor: NSViewRepresentable {
+    let stops: KeyStops
+    func makeNSView(context: Context) -> MonitorView {
+        let view = MonitorView()
+        view.stops = stops
+        return view
+    }
+    func updateNSView(_ view: MonitorView, context: Context) { view.stops = stops }
+
+    final class MonitorView: NSView {
+        var stops: KeyStops?
+        private var monitor: Any?
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            if let monitor { NSEvent.removeMonitor(monitor); self.monitor = nil }
+            guard window != nil else { return }
+            monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+                guard let self, let window = self.window, event.window === window, window.attachedSheet == nil,
+                      let stops = self.stops else { return event }
+                return stops.key(event, in: window) ? nil : event
+            }
+        }
+
+        deinit { if let monitor { NSEvent.removeMonitor(monitor) } }
+    }
+}
+
+/// `FramedButtonStyle` for a window whose controls are keyboard stops (Settings).
+struct KeyFramedButtonStyle: PrimitiveButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        Button(action: configuration.trigger) { configuration.label }
+            .buttonStyle(FramedButtonStyle())
+            .keyControl(action: configuration.trigger)
     }
 }

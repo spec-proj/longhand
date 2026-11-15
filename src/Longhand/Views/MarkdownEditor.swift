@@ -84,7 +84,16 @@ struct MarkdownEditor: NSViewRepresentable {
         // you last were in this scene (a new editor, as after Read, starts there too).
         DispatchQueue.main.async { [weak textView, weak coordinator = context.coordinator] in
             guard let textView, let coordinator else { return }
-            if let place = coordinator.takeAnchor() ?? places.place(for: scene) { textView.restore(place) }
+            if let anchor = coordinator.takeAnchor() {
+                textView.restore(anchor)
+            } else {
+                if let place = places.place(for: scene) { textView.restore(place) }
+                // SwiftUI dismantles the outgoing Read page slightly after making Write:
+                DispatchQueue.main.async { [weak textView, weak coordinator] in
+                    guard let textView, let coordinator, let anchor = coordinator.takeAnchor() else { return }
+                    textView.restore(anchor)
+                }
+            }
         }
 
         return scroll

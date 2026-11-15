@@ -6,6 +6,8 @@ struct MarginView: View {
     @EnvironmentObject private var store: LibraryStore
     @EnvironmentObject private var margin: MarginStore
     @AppStorage("marginTab") private var tab = MarginStore.Tab.comments.rawValue
+    /// The margin has the keyboard (its chosen tab is framed).
+    @State private var hasKeys = false
 
     var body: some View {
         // One panel, tabs to foot, the same height as the page and the contents.
@@ -24,7 +26,48 @@ struct MarginView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .background(Color(PaperTheme.well))
+        // The margin's keys, while it has the keyboard (Go › Margin).
+        .background(PaneKeys(pane: .margin, store: store, onKey: key, onFocus: { on in
+            if hasKeys != on { hasKeys = on }
+        }))
         .panel()
+    }
+
+    /// The tabs on offer, in order.
+    private var shownTabs: [MarginStore.Tab] { inLibrary ? [.notes, .changes] : [.comments, .notes, .changes] }
+
+    /// The margin's keys: ← → change tab; on Comments ↑ ↓ go through the comments (each
+    /// one's passage comes into view) and Return edits the chosen one; on Notes Return goes
+    /// into the note.
+    private func key(_ event: NSEvent) -> Bool {
+        guard event.modifierFlags.intersection([.command, .option, .control, .shift]).isEmpty else { return false }
+        switch event.keyCode {
+        case 123, 124:
+            let tabs = shownTabs
+            guard let index = tabs.firstIndex(of: current) else { return false }
+            tab = tabs[(index + (event.keyCode == 124 ? 1 : -1) + tabs.count) % tabs.count].rawValue
+        case 125, 126:
+            guard current == .comments else { return false }
+            let open = margin.comments.filter { !$0.resolved }
+            guard !open.isEmpty else { return true }
+            let index = open.firstIndex { $0.id == margin.focused }
+            let step = event.keyCode == 125 ? 1 : -1
+            let next = index.map { min(max($0 + step, 0), open.count - 1) } ?? (step > 0 ? 0 : open.count - 1)
+            margin.scrollTo(open[next].id)
+        case 36, 76:
+            switch current {
+            case .comments:
+                guard let id = margin.focused else { return false }
+                margin.editingRequest = id
+            case .notes:
+                Panes.typeNote.send()
+            default:
+                return false
+            }
+        default:
+            return false
+        }
+        return true
     }
 
     /// The tab shown. History became part of Versions (2026-11-08).
@@ -89,6 +132,7 @@ struct MarginView: View {
             .padding(.horizontal, 6)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(selected ? Color(PaperTheme.controlOn) : .clear)
+            .overlay(Rectangle().strokeBorder(Color(PaperTheme.controlOnBorder), lineWidth: selected && hasKeys ? 1 : 0))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -721,6 +765,7 @@ private struct NoteField: View {
             .lineLimit(3...)
             .focused($focused)
             .fieldBox(focused: focused, minHeight: 64)
+            .onReceive(Panes.typeNote) { focused = true }
             .onAppear { draft = text }
             .onChange(of: draft) { _, value in onChange(value) }
     }
