@@ -5,6 +5,13 @@ A writing app for fiction, essays and more, saved as .md files and tracked with 
 **Download:** [the latest release](https://github.com/spec-proj/longhand/releases/latest)  
 **Screenshots:** [spec-proj.github.io/longhand](https://spec-proj.github.io/longhand/)
 
+<a href="https://alternativeto.net/software/longhand/about/?utm_source=badge&utm_medium=referral" target="_blank">
+  <img src="https://alternativeto.net/static/badges/badge-compact-dark.svg"
+       alt="Longhand | AlternativeTo"
+       width="171" height="58"
+       style="width: 86px; height: 29px;" />
+</a>
+
 ## Features
 
 - **Stories, chapters and scenes.** A 'story' is a folder of documents: chapters broken up into scenes, chapters or scenes alone, or a single document. **Screenplays are also supported, using [Fountain](https://fountain.io/).**
