@@ -20,6 +20,10 @@ A writing app for fiction, essays and more, saved as .md files and tracked with 
 - **Typewriter scrolling, sentence/paragraph focus, word count targets** as well as comments and notes per scene, per chapter, and even per book. View your book or chapter in card view, rearrange your story, and switch back to read it as prose. 
 - **A beautiful library,** with folders, author profiles and (optional) cover images. You can store multiple author profiles and set pen names. Save your work in standard manuscript formats or export as .pdf or .epub.
 - **Future-proof** - your files are written in Markdown, stored as .md files and organised by the app with .json files, so you don't need Longhand to view them.
+- Other features:
+  - Create notebooks and collect poetry, lyrics, essays and short stories, with customisable file structures for each format.
+  - Simple, distinct placeholder covers.
+  - Many UI themes.
 
 _Longhand isn't notarised, so macOS asks before opening it the first time. Open it once, then choose System Settings › Privacy & Security › Open Anyway._
 
