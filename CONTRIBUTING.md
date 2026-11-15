@@ -1,5 +1,10 @@
 # Building Longhand
 
+I am open to pretty much anything in terms of feature suggestions, as long as it’s in the spirit of the app, mainly:  
+- Features/changes must be writer-forward.
+- Features/changes must not add unneeded complexity. Please simplify Longhand where possible.
+- Vibe coding is allowed, but please be rigorous and run tests.
+
 ## Build it
 
 You need Xcode 27 and [XcodeGen](https://github.com/yonaskolb/XcodeGen) (`brew install xcodegen`).
@@ -10,9 +15,9 @@ You need Xcode 27 and [XcodeGen](https://github.com/yonaskolb/XcodeGen) (`brew i
 
 This writes `dist/Longhand.app`. `Longhand.xcodeproj` is generated from `project.yml`; edit that, not the project. `"dist/Longhand Test.app/Contents/MacOS/Longhand" --selftest /tmp/report.txt` runs the self-test against a temporary library.
 
-## What's here
+## Contents
 
-| Path | What it is |
+| Path | Info |
 | --- | --- |
 | `src/Longhand` | The app (Swift, SwiftUI and AppKit) |
 | `project.yml` | The project, for XcodeGen |
