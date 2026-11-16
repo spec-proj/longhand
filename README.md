@@ -1,3 +1,5 @@
+<img src="/docs/images/chapter-dark.jpg">
+
 A lightweight writing app for fiction, essays, screenplays and more, saved as .md files and tracked with Git. Early beta.
 
 **Download:** [the latest release](https://github.com/spec-proj/longhand/releases/latest)  
