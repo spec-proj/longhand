@@ -1,3 +1,5 @@
+# Longhand
+
 <img src="/docs/images/chapter-dark.jpg">
 
 A lightweight writing app for fiction, essays, screenplays and more, saved as .md files and tracked with Git. Early beta.
