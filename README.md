@@ -1,4 +1,6 @@
 # Longhand
+[![Version](https://img.shields.io/github/v/release/spec-proj/longhand?label=version)](https://github.com/spec-proj/longhand/releases/latest)
+[![Size](https://img.shields.io/badge/size-8.5%20MB-blue)](https://github.com/spec-proj/longhand/releases/latest)
 
 <img src="/docs/images/chapter-dark.jpg">
 
