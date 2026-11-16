@@ -1,6 +1,4 @@
-![Longhand: Write where you are.](docs/images/readme-banner.jpg)
-
-A writing app for fiction, essays and more, saved as .md files and tracked with Git.
+A writing app for fiction, essays and more, saved as .md files and tracked with Git. Early beta.
 
 **Download:** [the latest release](https://github.com/spec-proj/longhand/releases/latest)  
 **Screenshots:** [spec-proj.github.io/longhand](https://spec-proj.github.io/longhand/)
