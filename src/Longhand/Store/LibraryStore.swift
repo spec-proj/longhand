@@ -990,12 +990,17 @@ final class LibraryStore: ObservableObject {
     }
 
     /// Moves a story into a folder, or out to the top of the library (nil). Its notes,
-    /// comments, history and cover go with it, and its versions follow the move.
+    /// comments, history and cover go with it, its versions follow the move, and it goes last
+    /// among the stories where it lands (two stories numbered 01 in one folder could not be
+    /// put in order, nor told apart when dragging).
     func moveBook(_ book: URL, toFolder folder: URL?) {
         guard let root = libraryURL, let current = self.book(for: book), current.folder != folder else { return }
         saveNow()
         let parent = folder ?? root
-        let destination = FileNaming.unique(parent.appendingPathComponent(book.lastPathComponent, isDirectory: true))
+        let order = (library?.books(in: folder).map(\.order).max() ?? 0) + 1
+        let destination = FileNaming.unique(parent.appendingPathComponent(
+            FileNaming.name(order: order, title: current.title), isDirectory: true
+        ))
         do {
             try FileManager.default.moveItem(at: book, to: destination)
         } catch {
@@ -1198,6 +1203,27 @@ final class LibraryStore: ObservableObject {
             }
             follow(moves)
             errorMessage = "Couldn’t move it."
+        }
+    }
+
+    /// Puts a story at `index` among the stories in its folder (dragging it in the Library).
+    /// One step at a time through `move`, which keeps titles, notes and places with it.
+    func placeBook(_ bookURL: URL, at index: Int) {
+        guard let book = library?.books.first(where: { $0.url == bookURL }),
+              var position = library?.books(in: book.folder).firstIndex(where: { $0.url == bookURL })
+        else { return }
+        let count = library?.books(in: book.folder).count ?? 0
+        let target = max(0, min(index, count - 1))
+        while position != target {
+            let stories = library?.books(in: book.folder) ?? []
+            guard stories.indices.contains(position) else { return }
+            let story = stories[position]
+            let step = target > position ? 1 : -1
+            move(ManuscriptItem(url: story.url, title: story.title, order: story.order, kind: .book), by: step)
+            // Stop if the move didn't happen (an error was shown).
+            guard let after = library?.books(in: book.folder), after.indices.contains(position + step),
+                  after[position + step].title == story.title else { return }
+            position += step
         }
     }
 

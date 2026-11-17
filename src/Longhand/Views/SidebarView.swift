@@ -44,6 +44,13 @@ struct SidebarView: View {
     /// A single document's headings (owner, 2026-11-14): its outline, in place of chapters.
     @State private var outline: [OutlineHeading] = []
     @State private var collapsedFolders: Set<URL> = []
+    /// The folder a dragged story is over, or true for the top of the Library.
+    @State private var storyOver: URL?
+    @State private var storyOverRoot = false
+    /// The story row a dragged story would take the place of.
+    @State private var storyTarget: URL?
+    /// The story row being dragged.
+    @State private var storyDrag: URL?
     @State private var renameFolder: Folder?
     @State private var renameTarget: ManuscriptItem?
     @State private var deleteTarget: ManuscriptItem?
@@ -389,13 +396,47 @@ struct SidebarView: View {
     }
 
     /// What a dragged row carries: a scene its path (as the cards do), a chapter its path
-    /// after "chapter:".
+    /// after "chapter:", a story its path after "story:".
     private static func payload(_ tag: Selection) -> String {
         switch tag {
         case .scene(let url): return url.path
         case .chapter(let url): return "chapter:" + url.path
         case .book(let url): return "story:" + url.path
         }
+    }
+
+    // MARK: - Stories in the Library
+
+    /// The story a drag carries ("story:" and its path).
+    private func storyIn(_ items: [String]) -> URL? {
+        guard let item = items.first, item.hasPrefix("story:") else { return nil }
+        return URL(fileURLWithPath: String(item.dropFirst("story:".count))).canonical
+    }
+
+    /// A story dragged onto a folder joins it (`nil`: the top of the Library). A story
+    /// dropped where it already is changes nothing.
+    private func dropStory(_ items: [String], into folder: URL?) -> Bool {
+        defer { storyOver = nil; storyOverRoot = false; storyDrag = nil }
+        guard let story = storyIn(items), let book = store.book(for: story), book.folder != folder
+        else { return false }
+        store.moveBook(story, toFolder: folder)
+        return true
+    }
+
+    /// A story dragged onto another story's row: in the same folder it takes that row's
+    /// place, in another folder it joins that folder.
+    private func dropStory(_ items: [String], at target: URL) -> Bool {
+        defer { storyTarget = nil; storyDrag = nil }
+        guard let story = storyIn(items), story != target,
+              let dragged = store.book(for: story), let over = store.book(for: target)
+        else { return false }
+        if dragged.folder != over.folder {
+            store.moveBook(story, toFolder: over.folder)
+            return true
+        }
+        let others = store.library?.books(in: over.folder).filter { $0.url != story } ?? []
+        store.placeBook(story, at: others.firstIndex { $0.url == target } ?? others.count)
+        return true
     }
 
     /// A scene over a chapter's row lands under it, as that chapter's first scene.
@@ -530,6 +571,15 @@ struct SidebarView: View {
             }
             .padding(.horizontal, Layout.pad)
             .frame(height: Layout.headerHeight)
+            .contentShape(Rectangle())
+            // A story dragged out of a folder and dropped here goes back to the top of the Library.
+            .background(storyOverRoot ? Color(PaperTheme.selection) : .clear)
+            .dropDestination(for: String.self) { items, _ in
+                dropStory(items, into: nil)
+            } isTargeted: { over in
+                storyOverRoot = over
+            }
+            .help("Drop a story here to take it out of its folder")
         }
     }
 
@@ -644,6 +694,13 @@ struct SidebarView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .background(storyOver == folder.url ? Color(PaperTheme.selection) : .clear)
+        // A story dragged onto a folder joins it; its notes and versions go with it.
+        .dropDestination(for: String.self) { items, _ in
+            dropStory(items, into: folder.url)
+        } isTargeted: { over in
+            if over { storyOver = folder.url } else if storyOver == folder.url { storyOver = nil }
+        }
         .help(count == 1 ? "1 story" : "\(count) stories")
         .contextMenu {
             Button("Rename…") { renameFolder = folder }
@@ -680,6 +737,27 @@ struct SidebarView: View {
         // views sharing an id in the stack made SwiftUI show the wrong one.
         .id("library:" + book.url.path)
         .contextMenu { bookMenu(book) }
+        // Drag a story onto another: in the same folder it takes that row's place, in
+        // another folder it joins that one.
+        .onDrag {
+            storyDrag = book.url
+            return NSItemProvider(object: Self.payload(.book(book.url)) as NSString)
+        }
+        .dropDestination(for: String.self) { items, _ in
+            dropStory(items, at: book.url)
+        } isTargeted: { over in
+            if over { storyTarget = book.url } else if storyTarget == book.url { storyTarget = nil }
+        }
+        .overlay(alignment: .top) {
+            if storyTarget == book.url, let storyDrag, storyDrag != book.url,
+               store.book(for: storyDrag)?.folder == book.folder {
+                Rectangle()
+                    .fill(Color(PaperTheme.ink))
+                    .frame(height: 2)
+                    .padding(.horizontal, Layout.pad)
+                    .allowsHitTesting(false)
+            }
+        }
     }
 
     @ViewBuilder

@@ -1011,11 +1011,13 @@ struct CardEditor: View {
         VStack(alignment: .leading, spacing: 6) {
             CardField(text: $title, placeholder: "Title", font: .systemFont(ofSize: size.titleSize, weight: .semibold),
                       multiline: false, focused: field == .title,
-                      onSubmit: onCommit, onCancel: onCancel, onTab: { _ in field = .synopsis }, onEnd: onEnd)
+                      onSubmit: onCommit, onCancel: onCancel, onTab: { _ in field = .synopsis }, onEnd: onEnd,
+                      onBegin: { field = .title })
             Rectangle().fill(Color(PaperTheme.hairline)).frame(height: 1)
             CardField(text: $synopsis, placeholder: "Synopsis", font: .systemFont(ofSize: size.synopsisSize),
                       multiline: true, focused: field == .synopsis,
-                      onSubmit: onCommit, onCancel: onCancel, onTab: { _ in field = .title }, onEnd: onEnd)
+                      onSubmit: onCommit, onCancel: onCancel, onTab: { _ in field = .title }, onEnd: onEnd,
+                      onBegin: { field = .synopsis })
             Spacer(minLength: 0)
         }
         .cardFrame(size: size, compact: compact, label: label, selected: true)
@@ -1036,6 +1038,9 @@ struct CardField: NSViewRepresentable {
     var onTab: (Bool) -> Void = { _ in }
     /// The keyboard went somewhere other than another card field (a click elsewhere).
     var onEnd: () -> Void = {}
+    /// A click put the keyboard in this field: the card follows it, so the field that had
+    /// the keyboard stops asking for it back (it once took it again mid-typing).
+    var onBegin: () -> Void = {}
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -1120,6 +1125,10 @@ struct CardField: NSViewRepresentable {
             default: return false
             }
             return true
+        }
+
+        func controlTextDidBeginEditing(_ notification: Notification) {
+            parent.onBegin()
         }
 
         func controlTextDidEndEditing(_ notification: Notification) {

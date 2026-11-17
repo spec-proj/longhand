@@ -442,7 +442,7 @@ enum Snapshot {
     /// this app, one step per line:
     /// `scene N` · `chapter N` · `click X Y` / `double X Y` (window points from its top left;
     /// `wclick X Y` sends the click straight to the window, for a locked screen) ·
-    /// `type TEXT` · `key CODE [cmd opt ctrl shift]` · `wait S` · `shot NAME` · `state LABEL`.
+    /// `type TEXT` · `key CODE [cmd opt ctrl shift]` · `wait S` · `scroll X Y DY` · `shot NAME` · `state LABEL`.
     /// Photos and `state.txt` go to the `LONGHAND_LIVE` folder; the run quits at the end.
     @MainActor
     static func runLiveScript(_ store: LibraryStore, dir: String, script: String) {
@@ -477,6 +477,11 @@ enum Snapshot {
                 event?.flags = flags
                 event?.postToPid(pid)
             }
+        }
+        /// One mouse event at a point from the window's top left, posted as a real one.
+        func mouse(_ type: CGEventType, _ x: Double, _ y: Double) {
+            let event = CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: screenPoint(x, y), mouseButton: .left)
+            event?.post(tap: .cghidEventTap)
         }
         func type(_ text: String) {
             for character in text.utf16 {
@@ -522,6 +527,18 @@ enum Snapshot {
                 }))
             case "click", "double":
                 steps.append((0.35, { click(numbers[0], numbers[1], count: command == "double" ? 2 : 1) }))
+            case "drag":
+                // `drag X1 Y1 X2 Y2`: a real drag, in small moves over half a second (a
+                // hand holding the button), so SwiftUI's drag and drop takes part.
+                guard numbers.count >= 4 else { break }
+                steps.append((0.3, { mouse(.leftMouseDown, numbers[0], numbers[1]) }))
+                for step in 1...14 {
+                    let t = Double(step) / 14
+                    let x = numbers[0] + (numbers[2] - numbers[0]) * t
+                    let y = numbers[1] + (numbers[3] - numbers[1]) * t
+                    steps.append((0.04, { mouse(.leftMouseDragged, x, y) }))
+                }
+                steps.append((0.5, { mouse(.leftMouseUp, numbers[2], numbers[3]) }))
             case "wclick":
                 // Straight into the window (works while the screen is locked or asleep).
                 steps.append((0.35, {
@@ -535,6 +552,25 @@ enum Snapshot {
                     if let up = event(.leftMouseUp, 0.05) { NSApp.postEvent(up, atStart: false) }
                     if let down = event(.leftMouseDown, 0) { window.sendEvent(down) }
                 }))
+            case "scroll":
+                // `scroll X Y DY [DX] [shift]`: a wheel scroll at a point (window points from
+                // its top left), posted as a real event, as a trackpad would.
+                steps.append((0.5, {
+                    guard numbers.count >= 3 else { return }
+                    let dx = numbers.count > 3 ? Int32(numbers[3]) : 0
+                    guard let wheel = CGEvent(scrollWheelEvent2Source: nil, units: .line,
+                                              wheelCount: dx == 0 ? 1 : 2,
+                                              wheel1: Int32(numbers[2]), wheel2: dx, wheel3: 0) else { return }
+                    if rest.contains("shift") { wheel.flags = .maskShift }
+                    wheel.location = screenPoint(numbers[0], numbers[1])
+                    wheel.post(tap: .cghidEventTap)
+                }))
+            case "cards":
+                steps.append((0.5, { store.setViewMode(.cards) }))
+            case "page":
+                steps.append((0.5, { store.setViewMode(.page) }))
+            case "library":
+                steps.append((0.5, { store.showLibrary() }))
             case "type":
                 steps.append((0.3, { type(rest) }))
             case "key":
@@ -739,10 +775,15 @@ enum Snapshot {
             guard let window = sheet ?? NSApp.windows.first(where: { ($0.isVisible || isBackgroundRun) && $0.contentView != nil && $0.frame.width > 400 }),
                   let view = window.contentView else { return }
 
+            // LONGHAND_SCROLL=x,y,dy: a wheel scroll (points from the window's top left) before
+            // the picture, for checking what a board or list does when scrolled.
+            scrollIfRequested(in: window)
+
             if environment["LONGHAND_DUMP"] == "1" {
                 var lines: [String] = [
                     "window.title=\"\(window.title)\" titleVisibility=\(window.titleVisibility.rawValue)"
                 ]
+                if let scrolled { lines.append("scroll: \(scrolled)") }
                 if let toolbar = window.toolbar {
                     lines.append("toolbar items=\(toolbar.items.count)")
                     for item in toolbar.items {
@@ -773,6 +814,37 @@ enum Snapshot {
         }
     }
 
+    /// Sends a wheel event where the writer would scroll, through the window (so the view under
+    /// the pointer gets it, as with a real trackpad).
+    @MainActor private(set) static var scrolled: String?
+
+    @MainActor
+    private static func scrollIfRequested(in window: NSWindow) {
+        guard let spec = environment["LONGHAND_SCROLL"] else { return }
+        let numbers = spec.split(separator: ",").compactMap { Double($0) }
+        guard numbers.count >= 3,
+              let cg = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1,
+                               wheel1: Int32(numbers[2]), wheel2: 0, wheel3: 0),
+              let event = NSEvent(cgEvent: cg), let content = window.contentView else { return }
+        let point = NSPoint(x: numbers[0], y: window.frame.height - numbers[1])
+        guard var hit = content.hitTest(point) else { scrolled = "nothing at \(point)"; return }
+        let hitType = String(describing: type(of: hit))
+        var chain = [hitType]
+        while !(hit is NSScrollView), let next = hit.superview { chain.append(String(describing: type(of: next))); hit = next }
+        guard let scroll = hit as? NSScrollView else { scrolled = "no scroll view at \(point): \(chain.joined(separator: " < "))"; return }
+        let before = scroll.contentView.bounds.origin
+        scroll.scrollWheel(with: event)
+        window.displayIfNeeded()
+        var note = "wheel \(before) → \(scroll.contentView.bounds.origin) (deltaY \(event.scrollingDeltaY), fixed \(event.hasPreciseScrollingDeltas))"
+        let limit = max(0, (scroll.documentView?.frame.height ?? 0) - scroll.contentView.bounds.height)
+        if scroll.contentView.bounds.origin == before, limit > 0 {
+            scroll.contentView.scroll(to: NSPoint(x: before.x, y: min(limit, before.y + 200)))
+            scroll.reflectScrolledClipView(scroll.contentView)
+            note += "; forced → \(scroll.contentView.bounds.origin) (limit \(limit))"
+        }
+        scrolled = "\(chain.joined(separator: " < ")) \(note)"
+    }
+
     private static func dump(_ view: NSView, depth: Int, into lines: inout [String]) {
         let indent = String(repeating: "  ", count: depth)
         var line = "\(indent)\(type(of: view)) frame=\(view.frame)"
@@ -782,6 +854,9 @@ enum Snapshot {
         }
         if let textView = view as? NSTextView, !textView.string.isEmpty {
             line += " textView(length=\(textView.string.count))"
+        }
+        if let scroll = view as? NSScrollView {
+            line += " document=\(scroll.documentView?.frame.size ?? .zero) at=\(scroll.contentView.bounds.origin)"
         }
         if view.isHidden { line += " hidden" }
         lines.append(line)

@@ -75,20 +75,30 @@ final class Updates: ObservableObject {
         return Release(version: version(of: tag), page: page, download: zip.flatMap(URL.init(string:)))
     }
 
-    /// "v0.9.5-beta" → "0.9.5".
+    /// "v0.9.5-beta" → "0.9.5", "v0.9.7a-beta" → "0.9.7a" (a letter fixes a mistake within one
+    /// number, so it is part of the version, not a build note).
     nonisolated static func version(of tag: String) -> String {
         var text = tag.trimmingCharacters(in: .whitespaces)
         if text.lowercased().hasPrefix("v") { text.removeFirst() }
-        return String(text.prefix { $0.isNumber || $0 == "." })
+        return String(text.prefix { $0.isNumber || $0 == "." || $0.isASCII && $0.isLetter })
     }
 
-    /// Whether version `a` comes after `b`, number by number ("0.10.0" after "0.9.4").
+    /// One number of a version and a letter that may follow it: "7a" → (7, "a").
+    nonisolated static func part(of piece: Substring) -> (Int, String) {
+        let digits = piece.prefix { $0.isNumber }
+        let letter = piece.drop { $0.isNumber }.lowercased()
+        return (Int(digits) ?? 0, String(letter))
+    }
+
+    /// Whether version `a` comes after `b`, number by number ("0.10.0" after "0.9.4"),
+    /// with a letter after the number ("0.9.7a" after "0.9.7", "0.9.8" after "0.9.7a").
     nonisolated static func isNewer(_ a: String, than b: String) -> Bool {
-        let x = a.split(separator: ".").map { Int($0) ?? 0 }
-        let y = b.split(separator: ".").map { Int($0) ?? 0 }
+        let x = a.split(separator: ".").map(part(of:))
+        let y = b.split(separator: ".").map(part(of:))
         for i in 0..<max(x.count, y.count) {
-            let p = i < x.count ? x[i] : 0, q = i < y.count ? y[i] : 0
-            if p != q { return p > q }
+            let p = i < x.count ? x[i] : (0, ""), q = i < y.count ? y[i] : (0, "")
+            if p.0 != q.0 { return p.0 > q.0 }
+            if p.1 != q.1 { return p.1 > q.1 }
         }
         return false
     }

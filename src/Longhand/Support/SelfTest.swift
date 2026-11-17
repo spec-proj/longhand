@@ -1876,6 +1876,78 @@ enum SelfTest {
             store.refreshFromDisk()
         }
 
+        // MARK: Stories dragged in the Library
+
+        do {
+            func atTop() -> [Book] { store.library?.books(in: nil) ?? [] }
+            store.createBook(title: "Drag One")
+            let one = atTop().last
+            store.createBook(title: "Drag Two")
+            let two = atTop().last
+            if let one, let two, one.url != two.url,
+               let start = atTop().firstIndex(where: { $0.url == one.url }) {
+                check(atTop().map(\.title).suffix(2) == [one.title, two.title],
+                      "stories: two new stories at the end of the Library")
+                // The second story dragged onto the first one's row: it takes its place.
+                let oneOrder = one.order
+                store.placeBook(two.url, at: start)
+                let after = atTop()
+                check(after.firstIndex { $0.title == one.title } == start + 1
+                      && after.firstIndex { $0.title == two.title } == start,
+                      "stories: a story dropped on another takes its place")
+                check(after.first { $0.title == two.title }?.order == oneOrder,
+                      "stories: its file's number follows its new place")
+                // A story being edited follows the move.
+                if let current = after.first(where: { $0.title == two.title }) {
+                    store.selection = .book(current.url)
+                    store.placeBook(current.url, at: start + 1)
+                    check(store.selection.map { store.book(for: $0.url)?.title } == two.title
+                          && store.selection?.url != current.url,
+                          "stories: the selection follows a story that moves")
+                } else {
+                    check(false, "stories: the moved story")
+                }
+                for book in atTop().filter({ $0.title == one.title || $0.title == two.title }) {
+                    store.delete(ManuscriptItem(url: book.url, title: book.title, order: book.order, kind: .book))
+                }
+                check(atTop().contains { $0.title == one.title || $0.title == two.title } == false,
+                      "stories: the two drag stories are cleared away")
+
+                // A story moved into a folder lands after the stories already there, so two
+                // stories in one folder never share a number.
+                if let tray = store.createFolder(named: "Tray") {
+                    store.createBook(title: "Tray Story")
+                    if let story = atTop().last {
+                        store.moveBook(story.url, toFolder: tray)
+                        let inside = store.library?.books(in: tray) ?? []
+                        check(inside.count == 1 && inside[0].title == "Tray Story" && inside[0].folder == tray,
+                              "stories: a story moved into a folder lands there")
+                        store.createBook(title: "Tray Second")
+                        if let second = atTop().last {
+                            store.moveBook(second.url, toFolder: tray)
+                            let both = store.library?.books(in: tray) ?? []
+                            check(both.count == 2 && Set(both.map(\.order)).count == 2,
+                                  "stories: a second story arriving in a folder is numbered after the first")
+                            for book in both {
+                                store.delete(ManuscriptItem(url: book.url, title: book.title, order: book.order, kind: .book))
+                            }
+                        } else {
+                            check(false, "stories: a second story for the folder")
+                        }
+                        store.deleteFolder(tray)
+                        check(store.library?.folders.contains { $0.url == tray } == false,
+                              "stories: the folder is cleared away")
+                    } else {
+                        check(false, "stories: a story for the folder")
+                    }
+                } else {
+                    check(false, "stories: a folder to move into")
+                }
+            } else {
+                check(false, "stories: two stories to reorder")
+            }
+        }
+
         // MARK: Story shapes: one document, scenes only, chapters only; joining and splitting
 
         do {
@@ -2855,10 +2927,14 @@ enum SelfTest {
             check(close?.title == "Close Window", "menus: ⌘W is Close Window")
             // A hidden run never puts Longhand in the owner's menu bar.
             let barItems = NSApp.windows.filter { String(describing: type(of: $0)).contains("StatusBar") && $0.frame.height > 0 }
-            check(Updates.version(of: "v0.9.5-beta") == "0.9.5" && Updates.isNewer("0.9.5", than: "0.9.4")
+            check(Updates.version(of: "v0.9.5-beta") == "0.9.5" && Updates.version(of: "v0.9.7a-beta") == "0.9.7a"
+                  && Updates.isNewer("0.9.5", than: "0.9.4")
                   && Updates.isNewer("0.10.0", than: "0.9.4") && Updates.isNewer("1.0", than: "0.9.9")
-                  && !Updates.isNewer("0.9.4", than: "0.9.4") && !Updates.isNewer("0.9.3", than: "0.9.4"),
-                  "updates: release tags are read and versions compared number by number")
+                  && !Updates.isNewer("0.9.4", than: "0.9.4") && !Updates.isNewer("0.9.3", than: "0.9.4")
+                  && !Updates.isNewer("0.9.7", than: "0.9.7a")
+                  && Updates.isNewer("0.9.7a", than: "0.9.7") && Updates.isNewer("0.9.8", than: "0.9.7a")
+                  && !Updates.isNewer("0.9.7a", than: "0.9.7a"),
+                  "updates: release tags are read and versions compared number by number, a letter after")
             let sampleRelease = #"{"tag_name":"v0.9.5-beta","html_url":"https://github.com/spec-proj/longhand/releases/tag/v0.9.5-beta","assets":[{"name":"Longhand.zip","browser_download_url":"https://github.com/spec-proj/longhand/releases/download/v0.9.5-beta/Longhand.zip"}]}"#
             let parsed = Updates.release(from: Data(sampleRelease.utf8))
             check(parsed?.version == "0.9.5" && parsed?.download?.lastPathComponent == "Longhand.zip" && parsed?.page.lastPathComponent == "v0.9.5-beta",
