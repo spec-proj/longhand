@@ -64,7 +64,7 @@ enum Snapshot {
     /// focus, so it never disturbs someone using the Mac.
     static var isBackgroundRun: Bool {
         let args = ProcessInfo.processInfo.arguments
-        return args.contains("--snapshot") || args.contains("--selftest") || args.contains("--perftest") || args.contains("--export-sample")
+        return args.contains("--snapshot") || args.contains("--selftest") || args.contains("--perftest") || args.contains("--export-sample") || args.contains("--paritytest")
     }
 
     /// Called before any window exists. A background run never becomes the active app, and its

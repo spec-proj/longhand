@@ -1654,17 +1654,87 @@ enum SelfTest {
             func all() -> [Scene] { store.library?.books.flatMap(\.chapters).flatMap(\.scenes) ?? [] }
             if all().isEmpty { store.createBook() }
             if let scene = all().first {
-                let was = scene.title, count = all().count
+                let was = scene.title, count = all().count, oldName = scene.url.lastPathComponent
                 store.selection = .scene(scene.url)
                 store.rename(item(scene), to: was.uppercased())
                 let shouted = all().first { $0.title == was.uppercased() }
                 check(shouted != nil && shouted?.url.lastPathComponent.hasSuffix(" 2.md") == false && all().count == count,
                       "rename: changing only the capitals keeps the name (no “… 2”)")
                 check(selectedSceneURL == shouted?.url, "rename: the open scene follows a capitals-only rename")
-                if let shouted { store.rename(item(shouted), to: was) }
+                if let shouted {
+                    // The Mac's disk treats the two spellings as one file, so Git has to be
+                    // told about the old one by hand; otherwise the other Mac keeps it.
+                    if let lib = store.libraryURL { _ = Git.commitAll(lib, message: "Case rename") }
+                    let folder = String(shouted.url.deletingLastPathComponent().path.dropFirst(root.canonical.path.count + 1))
+                    let listed = git("ls-files", "--", folder)
+                    check(listed.contains(shouted.url.lastPathComponent) && !listed.contains(oldName)
+                          && shouted.url.lastPathComponent != oldName,
+                          "rename: Git records the new capitals, so the other Mac doesn't keep the old name")
+                    store.rename(item(shouted), to: was)
+                }
                 check(all().contains { $0.title == was } && all().count == count, "rename: and back again")
             } else {
                 check(false, "rename: a scene to rename")
+            }
+        }
+
+        // MARK: Folder keepers and notes reach Git without a scene being saved
+
+        do {
+            store.createBook(title: "Keeper Test")
+            if let keeperBook = store.library?.books.first(where: { $0.title == "Keeper Test" }),
+               let chapter = keeperBook.chapters.first, let lib = store.libraryURL {
+                for scene in chapter.scenes { store.delete(item(scene)) }
+                let chapterKeeper = chapter.url.appendingPathComponent(LibraryFolders.keeper)
+                check(fm.fileExists(atPath: chapterKeeper.path),
+                      "Git: an emptied chapter keeps a hidden .keep, so the folder still travels")
+                _ = Git.commitAll(lib, message: "Keepers")
+                let chapterPath = String(chapterKeeper.canonical.path.dropFirst(root.canonical.path.count + 1))
+                check(git("ls-files").contains(chapterPath),
+                      "Git: the emptied chapter's .keep is committed, so the other Mac gets the folder")
+                store.delete(item(chapter))
+                let storyKeeper = keeperBook.url.appendingPathComponent(LibraryFolders.keeper)
+                check(fm.fileExists(atPath: storyKeeper.path),
+                      "Git: an emptied story keeps a hidden .keep, so the folder still travels")
+                if let folder = store.createFolder(named: "Keeper Folder") {
+                    check(fm.fileExists(atPath: folder.appendingPathComponent(LibraryFolders.keeper).path),
+                          "Git: a new empty folder keeps a hidden .keep, so the folder still travels")
+                }
+                _ = Git.commitAll(lib, message: "Keepers")
+                let storyPath = String(storyKeeper.canonical.path.dropFirst(root.canonical.path.count + 1))
+                check(git("ls-files").contains(storyPath),
+                      "Git: the emptied story's .keep is committed, so the other Mac gets the folder")
+                store.delete(ManuscriptItem(url: keeperBook.url, title: keeperBook.title, order: 1, kind: .book))
+                if let folder = store.library?.folders.first(where: { $0.url.lastPathComponent == "Keeper Folder" }) {
+                    store.deleteFolder(folder.url)
+                }
+            } else {
+                check(false, "Git: a story to empty for the keeper test")
+            }
+        }
+
+        do {
+            let chapter = store.library?.books.flatMap(\.chapters).first { !$0.scenes.isEmpty }
+            if let scene = chapter?.scenes.first, let lib = store.libraryURL {
+                store.selection = .scene(scene.url)
+                await settle(300)
+                _ = await withCheckedContinuation { (go: CheckedContinuation<Bool, Never>) in
+                    store.versions.commitNow { go.resume(returning: $0) }
+                }
+                await settle(250)
+                check(!store.versions.hasPendingCommit, "notes: nothing waits to be committed to begin with")
+                store.margin.setSceneNote("A note that has to travel.")
+                store.margin.saveNow()
+                check(store.versions.hasPendingCommit, "notes: writing only a note asks for a commit")
+                let relative = String(scene.url.path.dropFirst(root.canonical.path.count + 1).dropLast(3))
+                let notePath = ".longhand/notes/\(relative).md"
+                _ = Git.commitAll(lib, message: "Note")
+                check(git("ls-files").contains(notePath), "notes: the note file is committed like a save")
+                store.margin.setSceneNote("")
+                store.margin.saveNow()
+                _ = Git.commitAll(lib, message: "Note removed")
+            } else {
+                check(false, "notes: a scene and a library to test with")
             }
         }
 

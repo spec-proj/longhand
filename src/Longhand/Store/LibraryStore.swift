@@ -421,6 +421,7 @@ final class LibraryStore: ObservableObject {
         let previous = selection
         let scanned = scanLibrary(at: root)
         library = scanned.library
+        keepEmptyFolders()
         // The story the contents was inside may be gone (trashed, or removed outside
         // Longhand): back to the Library, so New Story works and New Scene isn't offered.
         if let open = openBook, !scanned.library.books.contains(where: { $0.url == open }) { openBook = nil }
@@ -461,6 +462,36 @@ final class LibraryStore: ObservableObject {
     private struct ScanResult {
         var library: Library
         var counts: [URL: Int]
+    }
+
+    /// Git keeps files, not folders. Every folder the writer can see that holds nothing else
+    /// gets the hidden keeper, so an emptied chapter, story or New Folder still reaches the
+    /// other Mac, and its place in the contents comes with it. One look per folder: cheap.
+    private func keepEmptyFolders() {
+        guard let library else { return }
+        let fm = FileManager.default
+        func keep(_ folder: URL) {
+            guard let contents = try? fm.contentsOfDirectory(atPath: folder.path) else { return }
+            guard !contents.contains(where: { !$0.hasPrefix(".") }) else { return }
+            let keeper = folder.appendingPathComponent(LibraryFolders.keeper)
+            if !fm.fileExists(atPath: keeper.path) {
+                try? "".write(to: keeper, atomically: true, encoding: .utf8)
+            }
+        }
+        for folder in library.folders { keep(folder.url) }
+        for book in library.books {
+            keep(book.url)
+            let boneyard = book.url.appendingPathComponent(StoryFolders.boneyard, isDirectory: true)
+            if fm.fileExists(atPath: boneyard.path) { keep(boneyard) }
+            for chapter in book.chapters where !chapter.implicit { keep(chapter.url) }
+        }
+    }
+
+    /// Where `url` lies under the library, as Git names it.
+    static func relativePath(_ url: URL, in library: URL) -> String? {
+        let base = library.canonical.path + "/"
+        guard url.canonical.path.hasPrefix(base) else { return nil }
+        return String(url.canonical.path.dropFirst(base.count))
     }
 
     private func scanLibrary(at root: URL) -> ScanResult {
@@ -946,16 +977,16 @@ final class LibraryStore: ObservableObject {
         let name = FileNaming.sanitized(newName)
         guard name != folder.lastPathComponent else { return }
         saveNow()
-        let destination = FileNaming.unique(root.appendingPathComponent(name, isDirectory: true))
+        let destination: URL
         do {
-            try FileManager.default.moveItem(at: folder, to: destination)
+            destination = try moveRenamed(folder, to: root.appendingPathComponent(name, isDirectory: true))
         } catch {
             errorMessage = "Couldn’t rename the folder."
             return
         }
         let names = LibraryFolders.listed(root).filter { $0 != folder.lastPathComponent } + [destination.lastPathComponent]
         LibraryFolders.setListed(names, in: root)
-        follow([(folder, destination.canonical)])
+        follow([(folder, destination)])
     }
 
     /// Moves a story into a folder, or out to the top of the library (nil). Its notes,
@@ -1780,11 +1811,21 @@ final class LibraryStore: ObservableObject {
         let proposed = url.deletingLastPathComponent().appendingPathComponent(name)
 
         if proposed.standardizedFileURL == url.standardizedFileURL { return url }
+        return try moveRenamed(url, to: proposed)
+    }
 
-        // Only the capitals change ("arrival" → "Arrival"): on the Mac's disk that is the
-        // same file, so "is the name taken?" says yes and the scene became "Arrival 2". Go
-        // by way of a hidden name instead.
-        if proposed.lastPathComponent.caseInsensitiveCompare(url.lastPathComponent) == .orderedSame {
+    /// Moves a renamed file or folder into place. Where only the capitals change, the Mac's
+    /// disk treats the two names as one file, so it goes by way of a hidden name (otherwise
+    /// "is the name taken?" makes "Arrival 2"), and the old spelling is taken out of Git's
+    /// index: `git add -A` cannot see that change by itself, and the other Mac would keep the
+    /// old capitals for ever.
+    @discardableResult
+    private func moveRenamed(_ url: URL, to proposed: URL) throws -> URL {
+        let onlyCapitals = proposed.lastPathComponent.caseInsensitiveCompare(url.lastPathComponent) == .orderedSame
+        let root = libraryURL
+        let oldPath = root.flatMap { Self.relativePath(url, in: $0) }
+        let destination: URL
+        if onlyCapitals {
             let parked = url.deletingLastPathComponent().appendingPathComponent(".longhand-moving-\(UUID().uuidString)")
             try FileManager.default.moveItem(at: url, to: parked)
             do {
@@ -1793,12 +1834,13 @@ final class LibraryStore: ObservableObject {
                 try? FileManager.default.moveItem(at: parked, to: url)
                 throw error
             }
+            destination = proposed
             CanonicalPaths.shared.forget()
-            return proposed.canonical
+        } else {
+            destination = FileNaming.unique(proposed)
+            try FileManager.default.moveItem(at: url, to: destination)
         }
-
-        let destination = FileNaming.unique(proposed)
-        try FileManager.default.moveItem(at: url, to: destination)
+        if onlyCapitals, let root, let oldPath { Git.forgetInIndex(root, at: oldPath) }
         return destination.canonical
     }
 
@@ -2189,7 +2231,10 @@ final class LibraryStore: ObservableObject {
         guard let url = exportSettingsURL else { return }
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        if let data = try? encoder.encode(settings) { try? data.write(to: url, options: .atomic) }
+        if let data = try? encoder.encode(settings) {
+            try? data.write(to: url, options: .atomic)
+            versions.filesChanged()
+        }
     }
 
     // MARK: - Finder

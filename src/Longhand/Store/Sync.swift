@@ -137,6 +137,9 @@ extension VersionStore {
 
     // MARK: - Automatic commits
 
+    /// Whether a change is waiting for its automatic commit (the self-test looks at this).
+    var hasPendingCommit: Bool { dirtySince != nil }
+
     /// The library's files changed (a save, a rename, a reorder). Commits once the writer has
     /// paused. Cheap: called a moment after every save.
     func filesChanged() {

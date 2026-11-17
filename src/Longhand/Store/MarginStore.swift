@@ -783,6 +783,7 @@ final class MarginStore: ObservableObject {
         infos[scene] = info.isEmpty ? nil : info
         if info.isEmpty {
             try? FileManager.default.removeItem(at: url)
+            onFilesChanged()
             return
         }
         let encoder = JSONEncoder()
@@ -790,6 +791,7 @@ final class MarginStore: ObservableObject {
         if let data = try? encoder.encode(info) {
             try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
             try? data.write(to: url, options: .atomic)
+            onFilesChanged()
         }
     }
 
@@ -852,6 +854,7 @@ final class MarginStore: ObservableObject {
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let url = FileNaming.unique(folder.appendingPathComponent("Untitled Note.md"))
         guard (try? "".write(to: url, atomically: true, encoding: .utf8)) != nil else { return }
+        onFilesChanged()
         reloadBookNotes()
         openNote(bookNotes.first { $0.url == url.canonical })
     }
@@ -863,6 +866,7 @@ final class MarginStore: ObservableObject {
         saveNow()
         let destination = FileNaming.unique(note.url.deletingLastPathComponent().appendingPathComponent(trimmed + ".md"))
         guard (try? FileManager.default.moveItem(at: note.url, to: destination)) != nil else { return }
+        onFilesChanged()
         let wasOpen = openBookNote?.url == note.url
         reloadBookNotes()
         if wasOpen { openBookNote = bookNotes.first { $0.url == destination.canonical } }
@@ -871,6 +875,7 @@ final class MarginStore: ObservableObject {
     func trashBookNote(_ note: BookNote) {
         saveNow()
         try? FileManager.default.trashItem(at: note.url, resultingItemURL: nil)
+        onFilesChanged()
         if openBookNote?.url == note.url { openBookNote = nil }
         reloadBookNotes()
     }
@@ -1131,6 +1136,7 @@ final class MarginStore: ObservableObject {
     func saveNow() {
         saveTask?.cancel()
         saveTask = nil
+        let changed = !dirtyScenes.isEmpty || !notesDirty.isEmpty
         for scene in dirtyScenes {
             guard let url = commentsURL(for: scene) else { continue }
             let kept = comments.filter {
@@ -1161,6 +1167,9 @@ final class MarginStore: ObservableObject {
             }
         }
         notesDirty = []
+        // Comments, notes and details are files in the library too: syncing them like a save is
+        // what carries them to the other Mac (they used to sit uncommitted until a scene saved).
+        if changed { onFilesChanged() }
     }
 
     private func write(_ text: String, to url: URL?) {

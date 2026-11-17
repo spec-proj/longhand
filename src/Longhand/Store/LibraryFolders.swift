@@ -16,6 +16,11 @@ import Foundation
 /// Everything else at the top is a story, as before. Both the library scan and the versions'
 /// own look at the disk use this one rule.
 enum LibraryFolders {
+    /// Git keeps files, not folders: an emptied chapter, story or folder would reach another
+    /// Mac as nothing at all. A folder with no other contents holds this hidden file (empty),
+    /// which Longhand's scans skip and Finder hides, so the folder itself travels.
+    static let keeper = ".keep"
+
     static func listURL(_ root: URL) -> URL {
         root.appendingPathComponent(".longhand/folders.json")
     }

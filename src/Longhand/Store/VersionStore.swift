@@ -854,6 +854,15 @@ enum Git {
         return run(["commit", "-q", "--no-verify", "-m", message], in: root).ok
     }
 
+    /// Takes a path out of Git's index, leaving the file where it is. A name whose capitals
+    /// changed is the same file to the Mac's disk, so `git add -A` never sees the new
+    /// spelling and another Mac would keep the old one for ever. Removing the old path makes
+    /// the next commit record the rename.
+    static func forgetInIndex(_ root: URL, at path: String) {
+        guard !path.isEmpty else { return }
+        run(["rm", "-q", "-r", "--cached", "--ignore-unmatch", "--", path], in: root)
+    }
+
     /// Saves the present as a version, puts every tracked file back as it was in `revision`
     /// (removing files that didn't exist then), and records that as a version too.
     static func restoreAll(_ root: URL, to revision: String, title: String) -> Bool {
@@ -869,7 +878,7 @@ enum Git {
         for folder in folders.sorted(by: { $0.count > $1.count }) {
             let url = root.appendingPathComponent(folder)
             let contents = (try? fm.contentsOfDirectory(atPath: url.path)) ?? ["?"]
-            if contents.allSatisfy({ $0 == ".DS_Store" }) { try? fm.removeItem(at: url) }
+            if contents.allSatisfy({ $0 == ".DS_Store" || $0 == LibraryFolders.keeper }) { try? fm.removeItem(at: url) }
         }
         commitAll(root, message: "Restored \(title)")
         return true

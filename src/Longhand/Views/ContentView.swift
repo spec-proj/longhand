@@ -197,6 +197,7 @@ struct ContentView: View {
             }
             SelfTest.runIfRequested(store: store)
             PerfTest.runIfRequested(store: store)
+            ParityTest.runIfRequested(store: store)
             ExportSample.runIfRequested(store: store)
             Snapshot.takeIfRequested()
         }

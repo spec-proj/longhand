@@ -87,7 +87,7 @@ final class AuthorProfiles: ObservableObject {
     private let file: URL?
 
     init() {
-        let hidden = CommandLine.arguments.contains { ["--selftest", "--snapshot", "--perftest", "--export-sample"].contains($0) }
+        let hidden = CommandLine.arguments.contains { ["--selftest", "--snapshot", "--perftest", "--export-sample", "--paritytest"].contains($0) }
         if hidden {
             file = nil
         } else {
