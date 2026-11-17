@@ -11,8 +11,8 @@ struct ScreenplayReader: View {
     @EnvironmentObject private var store: LibraryStore
     let scene: Scene
 
-    /// Read or Write for a screenplay: the toolbar's switch, ⌘R. Write by default.
-    static let readingKey = "screenplayReading"
+    /// Read or Write for a screenplay: the toolbar's switch, ⌘R. Write by default, and
+    /// remembered for this screenplay.
     /// Posted with a scene's index (0-based) to show its page.
     static let goToScene = Notification.Name("LonghandScreenplayGoToScene")
 
@@ -30,6 +30,22 @@ struct ScreenplayReader: View {
                                 return Exporter.screenplayTitlePage(of: book, document: document, store: store)
                             })
         }
+    }
+}
+
+/// A screenplay's story page (the story's own "Page" view, owner, 2026-11-16): the script as
+/// pages, read from the file — a screenplay is never shown as plain prose.
+struct ScreenplayStoryPage: View {
+    let book: Book
+    let script: Scene
+    /// The script's text, read from the file when the story changes.
+    let text: String
+    var margin: MarginStore
+    /// The title page, made with the pages.
+    let titlePage: (Fountain.Document) -> ScreenplayTitlePage?
+
+    var body: some View {
+        ScreenplayPages(text: text, version: 0, scene: script.url, margin: margin, titlePage: titlePage)
     }
 }
 

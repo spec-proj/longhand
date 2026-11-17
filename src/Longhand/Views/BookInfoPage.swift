@@ -356,6 +356,9 @@ struct BookInfoPage: View {
 
     private var chapters: some View {
         let hide = info.hideChapterNumbers == true
+        // A one-document story (a screenplay, a poem): its one line is the document itself,
+        // so it has no chapter number.
+        let oneDocument = book.shape == .document
         return VStack(alignment: .leading, spacing: 8) {
             HStack {
                 sectionTitle("Contents")
@@ -371,9 +374,12 @@ struct BookInfoPage: View {
             let starts = Estimate.startPages(book.chapters.map { store.wordCount(of: $0) })
             VStack(spacing: 2) {
                 ForEach(Array(book.chapters.enumerated()), id: \.element.id) { index, chapter in
-                    ChapterLine(number: hide ? nil : index + 1, title: chapter.title, page: starts[index],
+                    ChapterLine(number: (hide || oneDocument) ? nil : index + 1, title: chapter.title, page: starts[index],
                                 words: store.wordCount(of: chapter), status: margin.info(for: chapter.url).status) {
-                        store.selection = .chapter(chapter.url)
+                        // The story's own chapter (a one-document story): the document opens.
+                        store.selection = oneDocument
+                            ? .scene(book.document?.url ?? chapter.url)
+                            : .chapter(chapter.url)
                     }
                 }
                 if book.chapters.isEmpty {

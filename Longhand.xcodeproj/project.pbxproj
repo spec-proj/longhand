@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		04479B1C85F441AE4A130BDD /* ViewModes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1CE4548634954D99B14C3265 /* ViewModes.swift */; };
 		06F8E2881C1C2A96FAB31135 /* PDFWriter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 888442F83F7FCAB157CA2B60 /* PDFWriter.swift */; };
 		08E75D9A0D002A8E64F55E00 /* MarkdownFormat.swift in Sources */ = {isa = PBXBuildFile; fileRef = A98D1C29C61B7EB789C23168 /* MarkdownFormat.swift */; };
 		0905A6438C14F5FAA78647FF /* MenuBarItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 535B8CB7A64F4E88EFA0CDF6 /* MenuBarItem.swift */; };
@@ -93,6 +94,7 @@
 		0DBC7784A72608423FAC4023 /* ScreenplayLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenplayLayout.swift; sourceTree = "<group>"; };
 		1287B6EEA96790735BF2EC93 /* ScreenplayViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenplayViews.swift; sourceTree = "<group>"; };
 		14192FDFA7F33EC5AC44514D /* CourierPrime-Bold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "CourierPrime-Bold.ttf"; sourceTree = "<group>"; };
+		1CE4548634954D99B14C3265 /* ViewModes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewModes.swift; sourceTree = "<group>"; };
 		1D9404AD4DEBDE0BBB4007B9 /* LetteredCover.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LetteredCover.swift; sourceTree = "<group>"; };
 		21E700F9A74661CBBB74BC7C /* AuthorProfiles.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthorProfiles.swift; sourceTree = "<group>"; };
 		286AE51B373529AE23F5CD0C /* CommentOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommentOverlay.swift; sourceTree = "<group>"; };
@@ -283,6 +285,7 @@
 				823A215F083BCA2FA7112C37 /* Sync.swift */,
 				B80323476329D0AC226F5337 /* Updates.swift */,
 				A97566A05775181F643931BB /* VersionStore.swift */,
+				1CE4548634954D99B14C3265 /* ViewModes.swift */,
 			);
 			path = Store;
 			sourceTree = "<group>";
@@ -472,6 +475,7 @@
 				511AB304FD6F9B0D5E4E5404 /* Updates.swift in Sources */,
 				B5198D669A5BB77CA16705F0 /* VersionSheets.swift in Sources */,
 				61E9EB91A87D8E9AD55BCCBA /* VersionStore.swift in Sources */,
+				04479B1C85F441AE4A130BDD /* ViewModes.swift in Sources */,
 				FC0FA43C01EF73CB09B77AA9 /* WelcomeView.swift in Sources */,
 				CECE5CCC22E080B5F5201CB2 /* WritingModes.swift in Sources */,
 			);
@@ -535,7 +539,7 @@
 				CODE_SIGNING_REQUIRED = NO;
 				CODE_SIGN_IDENTITY = "-";
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 7;
+				CURRENT_PROJECT_VERSION = 8;
 				DEAD_CODE_STRIPPING = YES;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				DEVELOPMENT_TEAM = "";
@@ -558,7 +562,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 0.9.6;
+				MARKETING_VERSION = 0.9.7;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
@@ -607,7 +611,7 @@
 				CODE_SIGNING_REQUIRED = NO;
 				CODE_SIGN_IDENTITY = "-";
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 7;
+				CURRENT_PROJECT_VERSION = 8;
 				DEAD_CODE_STRIPPING = YES;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEPLOYMENT_POSTPROCESSING = YES;
@@ -625,7 +629,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 0.9.6;
+				MARKETING_VERSION = 0.9.7;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";

@@ -22,7 +22,6 @@ struct SidebarView: View {
     @State private var statuses: [URL: SceneInfo.Status] = [:]
     /// The book the contents is inside; empty for the Library (every book). Not a setting:
     /// it follows what is open (a scene or chapter opens its book).
-    @AppStorage("showCards") private var showCards = false
     /// The card chosen on the cards (the margin's scene), copied so rows don't observe the
     /// margin: its row is marked while the cards show.
     @State private var cardFocus: URL?
@@ -198,7 +197,7 @@ struct SidebarView: View {
         .panel()
         .onReceive(store.margin.$sceneURL) { url in
             // Only while the cards show: switching scenes otherwise needn't redraw the contents.
-            let next = showCards ? url : nil
+            let next = store.viewMode == .cards ? url : nil
             if next != cardFocus { cardFocus = next }
         }
         .onReceive(store.margin.$openCounts) { counts in
@@ -462,7 +461,10 @@ struct SidebarView: View {
         guard let book = openBook(in: library) else {
             return library.books.filter { $0.folder.map { !collapsedFolders.contains($0) } ?? true }.map { .book($0.url) }
         }
-        if store.contentsTab == .boneyard { return (book.boneyard?.scenes ?? []).map { .scene($0.url) } }
+        if store.contentsTab == .boneyard {
+            return book.boneyardChapters.flatMap(\.scenes).map { .scene($0.url) }
+                + (book.boneyard?.scenes ?? []).map { .scene($0.url) }
+        }
         var rows: [Selection] = [.book(book.url)]
         switch book.shape {
         case .document: return rows
@@ -568,8 +570,9 @@ struct SidebarView: View {
                     if store.selection != .scene(document.url) { store.selection = .scene(document.url) }
                     return
                 }
-                showCards = true
-                if store.selection != .book(book.url) { store.selection = .book(book.url) }
+                store.selection = .book(book.url)
+                // The story's cards, and remembered for that story.
+                store.setViewMode(.cards)
             } label: {
                 HStack(alignment: .center, spacing: 10) {
                     BookCover(title: book.title, image: cover(of: book), width: 64, form: looks[book.url]?.form, byline: looks[book.url]?.byline ?? "", collection: looks[book.url]?.collection)
@@ -801,6 +804,10 @@ struct SidebarView: View {
             Button("Rename…") { renameTarget = item(for: chapter) }
             statusMenu(chapter.url)
             Divider()
+            if store.canMoveChapterToBoneyard(chapter.url) {
+                Button("Move to Boneyard") { store.moveChapterToBoneyard(chapter.url) }
+                Divider()
+            }
             Button("Move Up") { store.move(item(for: chapter), by: -1) }
             Button("Move Down") { store.move(item(for: chapter), by: 1) }
             Divider()
@@ -863,7 +870,7 @@ struct SidebarView: View {
         let screenplay = document.pathExtension.lowercased() == ProseFile.fountain
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
             // A screenplay being read: its page.
-            if screenplay, UserDefaults.standard.bool(forKey: ScreenplayReader.readingKey) {
+            if screenplay, store.viewMode == .read {
                 NotificationCenter.default.post(name: ScreenplayReader.goToScene, object: heading.id)
                 return
             }
@@ -955,14 +962,14 @@ struct SidebarView: View {
         HStack(spacing: 0) {
             contentsTab(.contents, title: "Contents", count: nil)
             Rectangle().fill(Color(PaperTheme.hairline)).frame(width: 1)
-            contentsTab(.boneyard, title: "Boneyard", count: book.boneyard?.scenes.count)
+            contentsTab(.boneyard, title: "Boneyard", count: (book.boneyard?.scenes.count ?? 0) + book.boneyardChapters.count)
         }
         .frame(height: Layout.headerHeight)
     }
 
     /// Whether a scene's card is the one chosen on the cards now showing.
     private func onCards(_ url: URL) -> Bool {
-        guard showCards, cardFocus == url else { return false }
+        guard store.viewMode == .cards, cardFocus == url else { return false }
         switch store.selection {
         case .chapter, .book: return true
         default: return false
@@ -998,13 +1005,56 @@ struct SidebarView: View {
         }
     }
 
-    /// The Boneyard tab: each cut scene with where it was ("1.3") or, for a passage, the day
-    /// it was cut. Click to open one; right-click to restore it. Empty when nothing is cut
-    /// (owner: no line saying so).
+    /// The Boneyard tab: each cut chapter and cut scene, with where it was ("1.3") or, for a
+    /// passage, the day it was cut. Click to open one; right-click to restore it. Empty when
+    /// nothing is cut (owner: no line saying so).
     @ViewBuilder
     private func boneyardList(_ book: Book) -> some View {
+        ForEach(book.boneyardChapters) { chapter in
+            boneyardChapterRow(chapter, in: book)
+        }
         ForEach(book.boneyard?.scenes ?? []) { scene in
             boneyardRow(scene, in: book)
+        }
+    }
+
+    /// A cut chapter: the whole chapter, with the number it had. Clicking it opens its first
+    /// scene; right-click puts the chapter back where it was.
+    private func boneyardChapterRow(_ chapter: Chapter, in book: Book) -> some View {
+        let cut = store.margin.info(for: chapter.url).cut
+        let detail = cut?.number ?? cut.map { $0.date.formatted(.dateTime.day().month(.abbreviated)) }
+        let first = chapter.scenes.first
+        return Button {
+            takeKeys()
+            if let first, store.selection != .scene(first.url) { store.selection = .scene(first.url) }
+        } label: {
+            HStack(spacing: 8) {
+                Text(chapter.title)
+                    .font(.system(size: Layout.listSize))
+                    .foregroundStyle(Color(PaperTheme.secondary))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Spacer(minLength: 8)
+                if let detail {
+                    Text(detail)
+                        .font(.system(size: Layout.detailSize, weight: .medium).monospacedDigit())
+                        .foregroundStyle(Color(PaperTheme.tertiary))
+                        .fixedSize()
+                }
+            }
+            .padding(.leading, Layout.pad)
+            .padding(.trailing, Layout.pad)
+            .frame(height: 24)
+            .rowBackground(Color.clear, framed: false)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(cut.map { "Cut from \($0.from)" } ?? chapter.title)
+        .contextMenu {
+            Button("Restore") { store.restoreChapter(chapter.url) }
+            Divider()
+            Button("Show in Finder") { store.reveal(chapter.url) }
+            Button("Move to Trash", role: .destructive) { deleteTarget = item(for: chapter) }
         }
     }
 

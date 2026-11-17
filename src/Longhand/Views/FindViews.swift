@@ -189,10 +189,8 @@ struct QuickOpen: View {
 
         // Views of where you are.
         if case .book = store.selection, store.openBook != nil {
-            let page = defaults.bool(forKey: StoryPage.key)
             list.append(command("Toggle Contents / Page", "⌘R") {
-                defaults.set(false, forKey: "showCards")
-                defaults.set(!page, forKey: StoryPage.key)
+                store.togglePageView()
             })
         }
         // The Boneyard.
@@ -202,6 +200,9 @@ struct QuickOpen: View {
             })
             if case .scene(let url) = store.selection, store.canMoveToBoneyard(url) {
                 list.append(command("Move to Boneyard") { store.moveToBoneyard(url) })
+            }
+            if case .chapter(let url) = store.selection, store.canMoveChapterToBoneyard(url) {
+                list.append(command("Move to Boneyard") { store.moveChapterToBoneyard(url) })
             }
             // A single document: the passage selected on the page.
             if case .scene(let url) = store.selection, book.document?.url == url,
@@ -218,20 +219,17 @@ struct QuickOpen: View {
             }
         }
         if case .scene(let url) = store.selection, url.pathExtension.lowercased() == ProseFile.fountain {
-            let reading = defaults.bool(forKey: ScreenplayReader.readingKey)
             list.append(command("Toggle Read / Write", "⌘R") {
-                defaults.set(!reading, forKey: ScreenplayReader.readingKey)
+                store.togglePageView()
             })
         }
         if case .chapter = store.selection {
-            let reading = defaults.object(forKey: ChapterDocumentView.readingKey) as? Bool ?? true
             list.append(command("Toggle Read / Write", "⌘R") {
-                defaults.set(false, forKey: "showCards")
-                defaults.set(!reading, forKey: ChapterDocumentView.readingKey)
+                store.togglePageView()
             })
         }
         list += [
-            command("Toggle Cards", "⌘3") { flip("showCards") },
+            command("Toggle Cards", "⌘3") { store.toggleCards() },
             command("Toggle Contents Column", "⌘1") { defaults.set(!shown("showSidebar"), forKey: "showSidebar") },
             command("Toggle Margin", "⌘2") { defaults.set(!shown("showMargin"), forKey: "showMargin") },
             command("Toggle Distraction-Free Mode", "⌘.") { store.deskCleared.toggle() },

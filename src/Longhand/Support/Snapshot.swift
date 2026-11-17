@@ -73,6 +73,23 @@ enum Snapshot {
     static func prepareBackgroundRun() {
         guard isBackgroundRun else { return }
         NSApplication.shared.setActivationPolicy(.prohibited)
+        // The view each document is shown in (the switch in the toolbar): the cards, a
+        // chapter to write, a story's page.
+        if environment["LONGHAND_CARDS"] == "1" {
+            ViewModes.forcedChapter = .cards
+            ViewModes.forcedStory = .cards
+        } else {
+            if environment["LONGHAND_STORYPAGE"] == "1" { ViewModes.forcedStory = .page }
+            if environment["LONGHAND_SCREENPLAY"] == "read" {
+                ViewModes.forcedChapter = .read
+            } else if ProcessInfo.processInfo.arguments.contains("--selftest")
+                        || ProcessInfo.processInfo.arguments.contains("--perftest")
+                        || environment["LONGHAND_WRITE"] == "1" {
+                // Tests type on the chapter page; pictures show it for writing unless
+                // LONGHAND_WRITE=1.
+                ViewModes.forcedChapter = .write
+            }
+        }
         UserDefaults.standard.setVolatileDomain([
             "marginTab": environment["LONGHAND_TAB"] ?? (environment["LONGHAND_NOTES"] == "1" ? "notes" : "comments"),
             "showMargin": true,
@@ -81,13 +98,7 @@ enum Snapshot {
             ProseSize.defaultsKey: Int(environment["LONGHAND_PROSESIZE"] ?? "") ?? 0,
             AppTheme.defaultsKey: environment["LONGHAND_THEME"] ?? AppTheme.paper.rawValue,
             AppTheme.modeKey: "system",
-            "showCards": environment["LONGHAND_CARDS"] == "1",
             CardSize.key: environment["LONGHAND_CARDSIZE"] ?? CardSize.medium.rawValue,
-            StoryPage.key: environment["LONGHAND_STORYPAGE"] == "1",
-            ScreenplayReader.readingKey: environment["LONGHAND_SCREENPLAY"] == "read",
-            // Tests type on the chapter page; pictures show it for reading unless LONGHAND_WRITE=1.
-            ChapterDocumentView.readingKey: !(ProcessInfo.processInfo.arguments.contains("--selftest")
-                || ProcessInfo.processInfo.arguments.contains("--perftest") || environment["LONGHAND_WRITE"] == "1"),
             WritingModes.focusKey: environment["LONGHAND_FOCUSMODE"] != nil,
             WritingModes.unitKey: environment["LONGHAND_FOCUSMODE"] ?? WritingModes.Unit.sentence.rawValue,
             WritingModes.typewriterKey: environment["LONGHAND_TYPEWRITER"] == "1"

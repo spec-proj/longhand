@@ -1828,6 +1828,14 @@ enum SelfTest {
             check(disk(document?.document?.url) == "A first line." && store.wordCount(of: document!) == 3,
                   "shapes: typing in a document saves and counts")
             check(store.number(ofScene: document?.document?.url ?? root) == nil, "shapes: a document has no number")
+            // A one-document story's own chapter is the story itself, not a page of its own:
+            // choosing it opens the document (a screenplay must stay a script, not prose).
+            if let doc = document?.document, let own = document?.chapters.first(where: \.implicit) {
+                store.selection = .chapter(own.url)
+                await settle(200)
+                check(store.selection == .scene(doc.url),
+                      "shapes: choosing a document story's own chapter opens the document")
+            }
             if let doc = document?.document { check(Git.isScene(relative(doc.url)) && Git.scenesOnDisk(root.canonical).contains(relative(doc.url)),
                                                    "shapes: Git counts the document as a scene") }
 
@@ -1867,6 +1875,13 @@ enum SelfTest {
                   "shapes: a scenes-only story keeps its scenes straight in its folder")
             check(store.canAddScene && !store.canAddChapter, "shapes: a scenes-only story takes scenes, not chapters")
             check(scenesOnly?.looseScenes.last.flatMap { store.number(ofScene: $0.url) } == "2", "shapes: its scenes are numbered 1, 2")
+            // A scenes-only story's own chapter is a real page: its scenes on one.
+            if let own = scenesOnly?.chapters.first(where: \.implicit) {
+                store.selection = .chapter(own.url)
+                await settle(200)
+                check(store.selection == .chapter(own.url),
+                      "shapes: a scenes-only story's own chapter is still its own page")
+            }
             if let book = scenesOnly { store.splitIntoChapters(book.url) }
             let wrapped = store.library?.books.first { $0.url == scenesOnly?.url }
             check(wrapped?.shape == .chaptersAndScenes && wrapped?.chapters.count == 1 && wrapped?.chapters.first?.scenes.count == 2,
@@ -2158,6 +2173,18 @@ enum SelfTest {
                 let renamed = store.library?.books.first { $0.title == "Night Boat" }
                 check(renamed?.document?.url.lastPathComponent == "Night Boat.fountain" && renamed?.isScreenplay == true,
                       "screenplay: renaming the story renames its .fountain file")
+
+                // The story's page lists its contents; for a screenplay that line is the
+                // story itself. Choosing it must open the script, not the text as prose
+                // (owner, 2026-11-16: "it reverts to normal prose when I start writing").
+                if let script = renamed?.document, let own = renamed?.chapters.first(where: \.implicit) {
+                    store.selection = .chapter(own.url)
+                    await settle(400)
+                    let font = (margin.textView?.textStorage?.attribute(.font, at: 0, effectiveRange: nil) as? NSFont)
+                    check(store.selection == .scene(script.url)
+                          && font?.fontName.hasPrefix("CourierPrime") == true,
+                          "screenplay: choosing the story's own contents opens the script, in Courier Prime (\(font?.fontName ?? "none"))")
+                }
             }
 
             // A scene with comments, then a screenplay: no highlights carried over.
@@ -2201,9 +2228,8 @@ enum SelfTest {
                         for sub in view.subviews { if let found = sheets(in: sub) { return found } }
                         return nil
                     }
-                    // Settings change in memory only in a hidden run.
-                    let saved = defaults.volatileDomain(forName: UserDefaults.argumentDomain)
-                    defaults.setVolatileDomain(saved.merging([ScreenplayReader.readingKey: true]) { $1 }, forName: UserDefaults.argumentDomain)
+                    // The screenplay's own Read and Write pages.
+                    store.setViewMode(.read)
                     await settle(600)
                     let window = NSApp.windows.first { sheets(in: $0.contentView) != nil }
                     let reading = sheets(in: window?.contentView)
@@ -2212,7 +2238,7 @@ enum SelfTest {
                           "⌘R: Read opens at the part of the script Write was showing (\(shown ?? -1) for \(target.location))")
                     reading?.show(source: (page.string as NSString).range(of: "INT. ROOM 10 - DAY").location)
                     await settle(200)
-                    defaults.setVolatileDomain(saved.merging([ScreenplayReader.readingKey: false]) { $1 }, forName: UserDefaults.argumentDomain)
+                    store.setViewMode(.write)
                     await settle(600)
                     let back = margin.textView.map { $0.currentPlace.top } ?? -1
                     let ten = (store.text as NSString).range(of: "INT. ROOM 10 - DAY").location
@@ -2330,6 +2356,107 @@ enum SelfTest {
                 check(disk(file.url) == "First paragraph.\n\nThe radio had been dead since October.\n\nLast paragraph."
                       && newest()?.boneyard == nil,
                       "boneyard: Restore puts a passage back after the text it followed, and empties the Boneyard")
+            }
+        }
+
+        // MARK: The Boneyard: a chapter in it, and the view each document keeps (2026-11-15)
+
+        do {
+            func newest() -> Book? { store.library?.books.max { $0.order < $1.order } }
+            store.createBook(title: "Marram", form: .novel, shape: .chaptersAndScenes)
+            store.createChapterInContext()
+            store.createChapterInContext()
+            guard let book = newest(), book.chapters.count == 3 else {
+                check(false, "boneyard: a story with three chapters to cut from")
+                write(lines, failures: failures, to: reportPath)
+                return finish()
+            }
+            let titles = book.chapters.map(\.title)
+            let second = book.chapters[1]
+            let words = store.wordCount(of: second)
+            let whole = store.wordCount(of: book)
+            store.selection = .chapter(second.url)
+            await settle(200)
+            store.moveChapterToBoneyard(second.url)
+            await settle(400)
+            let after = newest()
+            let cut = after?.boneyardChapters.first
+            check(cut?.url.deletingLastPathComponent().lastPathComponent == "Boneyard"
+                  && after?.chapters.count == 2
+                  && after?.chapters.map(\.title) == [titles[0], titles[2]],
+                  "boneyard: a chapter cut from the story is kept whole in its Boneyard, out of the manuscript")
+            check(after.map { store.wordCount(of: $0) } == whole - words,
+                  "boneyard: a cut chapter's words leave the story's count")
+            check(cut.map { store.margin.info(for: $0.url).cut?.number } == "2"
+                  && after?.chapters.first?.url.lastPathComponent == FileNaming.name(order: 1, title: titles[0]),
+                  "boneyard: it remembers it was chapter 2, and the chapters that stay are numbered as they stand")
+            if let cut {
+                store.restoreChapter(cut.url)
+                await settle(400)
+                let back = newest()
+                check(back?.boneyardChapters.isEmpty == true
+                      && back?.chapters.count == 3
+                      && back?.chapters.map(\.title) == titles
+                      && back?.chapters.map { $0.url.lastPathComponent } == titles.enumerated().map { FileNaming.name(order: $0.offset + 1, title: $0.element) },
+                      "boneyard: Restore puts the chapter back where it was, and numbers the chapters as they stand")
+            }
+        }
+
+        do {
+            // The view each document is shown in is remembered for that document.
+            func newest() -> Book? { store.library?.books.max { $0.order < $1.order } }
+            let forced = ViewModes.forcedChapter
+            ViewModes.forcedChapter = nil
+            defer { ViewModes.forcedChapter = forced }
+            if let book = newest(), book.chapters.count >= 2 {
+                let first = book.chapters[0], second = book.chapters[1]
+                store.selection = .chapter(first.url)
+                await settle(200)
+                check(store.viewMode == .read, "view: a chapter opens to read")
+                store.setViewMode(.write)
+                check(store.viewMode == .write, "view: the chapter can be shown for writing")
+                store.selection = .chapter(second.url)
+                await settle(200)
+                check(store.viewMode == .read, "view: another chapter keeps its own view")
+                store.selection = .chapter(first.url)
+                await settle(200)
+                check(store.viewMode == .write, "view: the chapter is shown the way it was left")
+                store.toggleCards()
+                check(store.viewMode == .cards, "view: the cards are a view of their own")
+                store.toggleCards()
+                check(store.viewMode == .write, "view: the cards give back the page they came from")
+                // A story: its contents page, its whole story, its cards.
+                store.selection = .book(book.url)
+                store.openBook = book.url
+                await settle(200)
+                check(store.viewMode == .contents, "view: a story opens on its contents page")
+                store.setViewMode(.page)
+                store.selection = .chapter(first.url)
+                await settle(200)
+                store.selection = .book(book.url)
+                await settle(200)
+                check(store.viewMode == .page, "view: the story is shown the way it was left")
+            } else {
+                check(false, "view: a story with two chapters")
+            }
+        }
+
+        do {
+            // ⇧⌘⌫ sends what is chosen to the Boneyard.
+            func newest() -> Book? { store.library?.books.max { $0.order < $1.order } }
+            if let book = newest(), let scene = book.chapters.first?.scenes.first {
+                let count = book.chapters.first?.scenes.count ?? 0
+                store.selection = .scene(scene.url)
+                await settle(200)
+                check(store.canMoveSelectionToBoneyard, "boneyard: the chosen scene can be sent to the Boneyard")
+                store.moveSelectionToBoneyard()
+                await settle(300)
+                let cut = newest()?.boneyard?.scenes.first { $0.title == scene.title }
+                check(cut?.url.deletingLastPathComponent().lastPathComponent == "Boneyard"
+                      && newest()?.chapters.first?.scenes.count == count - 1,
+                      "boneyard: ⇧⌘⌫ sends the chosen scene to the Boneyard")
+            } else {
+                check(false, "boneyard: a scene to send to the Boneyard")
             }
         }
 

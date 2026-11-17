@@ -13,11 +13,7 @@ struct LonghandApp: App {
     @ObservedObject private var themeState = ThemeState.shared
     @AppStorage(AppTheme.modeKey) private var appearanceMode = "system"
     @AppStorage(StatusBar.countKey) private var showCount = true
-    @AppStorage("showCards") private var showCards = false
     @AppStorage(CardSize.key) private var cardSize = CardSize.medium.rawValue
-    @AppStorage(ChapterDocumentView.readingKey) private var chapterReading = true
-    @AppStorage(ScreenplayReader.readingKey) private var screenplayReading = false
-    @AppStorage(StoryPage.key) private var storyPage = false
     @AppStorage(WritingModes.focusKey) private var focus = false
     @AppStorage(WritingModes.unitKey) private var focusUnit = WritingModes.Unit.sentence.rawValue
     @AppStorage(WritingModes.typewriterKey) private var typewriter = false
@@ -112,6 +108,10 @@ struct LonghandApp: App {
                     .keyboardShortcut("e", modifiers: .command)
                     .disabled(store.library?.books.isEmpty ?? true)
                 Divider()
+                Button("Move to Boneyard") { store.moveSelectionToBoneyard() }
+                    .keyboardShortcut(.delete, modifiers: [.command, .shift])
+                    .disabled(!store.canMoveSelectionToBoneyard)
+                Divider()
                 Button("Show Library in Finder") { store.revealLibrary() }
                     .keyboardShortcut("r", modifiers: [.command, .shift])
                     .disabled(store.library == nil)
@@ -183,7 +183,7 @@ struct LonghandApp: App {
                     .keyboardShortcut("1", modifiers: .command)
                 Button(showMargin ? "Hide Margin" : "Show Margin") { showMargin.toggle() }
                     .keyboardShortcut("2", modifiers: .command)
-                Button(showCards ? "Show as Page" : "Show as Cards") { showCards.toggle() }
+                Button(store.viewMode == .cards ? "Show as Page" : "Show as Cards") { store.toggleCards() }
                     .keyboardShortcut("3", modifiers: .command)
                 Picker("Card Size", selection: $cardSize) {
                     ForEach(CardSize.allCases) { size in
@@ -192,17 +192,10 @@ struct LonghandApp: App {
                 }
                 // A chapter set like the book, or the same chapter for editing; a story's
                 // contents, or the whole story to read.
-                Button(showingStory ? (storyPage ? "Show Contents" : "Read Story")
-                       : showingScreenplay ? (screenplayReading ? "Write Screenplay" : "Read Screenplay")
-                       : (chapterReading ? "Write in Chapter" : "Read Chapter")) {
-                    showCards = false
-                    if showingStory {
-                        storyPage.toggle()
-                    } else if showingScreenplay {
-                        screenplayReading.toggle()
-                    } else {
-                        chapterReading.toggle()
-                    }
+                Button(showingStory ? (store.viewMode == .page ? "Show Contents" : "Read Story")
+                       : showingScreenplay ? (store.viewMode == .read ? "Write Screenplay" : "Read Screenplay")
+                       : (store.viewMode == .write ? "Read Chapter" : "Write in Chapter")) {
+                    store.togglePageView()
                 }
                 .keyboardShortcut("r", modifiers: .command)
                 .disabled(!showingChapter && !showingStory && !showingScreenplay)

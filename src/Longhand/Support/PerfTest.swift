@@ -94,9 +94,7 @@ enum PerfTest {
         if let only = ProcessInfo.processInfo.environment["LONGHAND_PERF_ONLY"] {
             let repeats = Int(ProcessInfo.processInfo.environment["LONGHAND_PERF_REPEAT"] ?? "") ?? 200
             if only == "cards" {
-                UserDefaults.standard.setVolatileDomain(
-                    UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain).merging(["showCards": true]) { $1 },
-                    forName: UserDefaults.argumentDomain)
+                ViewModes.forcedStory = .cards
                 store.openBook = book.url
             }
             // LONGHAND_PERF_BARE=1|sidebar|margin: without both side columns, or with only that one.
@@ -420,10 +418,7 @@ enum PerfTest {
         report("keep the rewrite (no overlap)", now() - t)
 
         // The book as cards.
-        UserDefaults.standard.setVolatileDomain(
-            UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain).merging(["showCards": true]) { $1 },
-            forName: UserDefaults.argumentDomain
-        )
+        ViewModes.forcedStory = .cards
         t = now()
         store.selection = .book(book.url)
         await settle(1)

@@ -4,12 +4,21 @@ extension URL {
     /// macOS reports `/private/var/...` for scanned files but `/var/...` for paths we build,
     /// so every URL the app compares must be canonicalised first.
     ///
+    /// A folder's address is written two ways: the ones read from disk end in a slash, the
+    /// ones built by hand do not, and the system treats the two as different files (even
+    /// where they mean the same folder). So the canonical form is one shape for every
+    /// folder, whichever way it was made.
+    ///
     /// Resolving asks the disk about every folder on the way (~8 system calls), and views ask
     /// for it on every redraw, so results for files that exist are remembered.
     var canonical: URL {
         let path = self.path
         if let known = CanonicalPaths.shared.lookup(path) { return known }
-        let resolved = standardizedFileURL.resolvingSymlinksInPath()
+        var resolved = standardizedFileURL.resolvingSymlinksInPath()
+        if resolved.absoluteString.hasSuffix("/"), resolved.path.count > 1 {
+            // `URL(fileURLWithPath:)` would put the slash back (a folder gets one).
+            resolved = URL(fileURLWithPath: resolved.path, isDirectory: false)
+        }
         if FileManager.default.fileExists(atPath: resolved.path) {
             CanonicalPaths.shared.remember(path, resolved)
         }

@@ -169,15 +169,12 @@ private struct CommentsPane: View {
     @EnvironmentObject private var store: LibraryStore
     @EnvironmentObject private var margin: MarginStore
 
-    @AppStorage("showCards") private var showCards = false
-    @AppStorage(StoryPage.key) private var storyPage = false
-
     /// The list follows the page while a scene, a chapter's page or a story's Page is open.
     private var sceneOpen: Bool {
         switch store.selection {
         case .scene: return true
-        case .chapter: return !showCards
-        case .book: return !showCards && storyPage && store.openBook != nil
+        case .chapter: return store.viewMode != .cards
+        case .book: return store.viewMode == .page && store.openBook != nil
         default: return false
         }
     }

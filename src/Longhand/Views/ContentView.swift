@@ -12,10 +12,6 @@ struct ContentView: View {
     @AppStorage("marginTab") private var marginTab = MarginStore.Tab.comments.rawValue
     @AppStorage(ProseFace.defaultsKey) private var proseFace = ProseFace.sfPro.rawValue
     @AppStorage(ProseSize.defaultsKey) private var proseSize = 0
-    @AppStorage("showCards") private var showCards = false
-    @AppStorage(ChapterDocumentView.readingKey) private var chapterReading = true
-    @AppStorage(ScreenplayReader.readingKey) private var screenplayReading = false
-    @AppStorage(StoryPage.key) private var storyPage = false
     @State private var renameTarget: ManuscriptItem?
     /// The contents column's width, panel and gap included: drag its right edge (remembered).
     @AppStorage("contentsWidth") private var contentsWidth = Double(Layout.contentsWidth)
@@ -103,7 +99,10 @@ struct ContentView: View {
         }
         // A pane or page that had the keyboard was put away (⌘1, ⌘2, ⌘3, ⌘R): it goes to
         // what took its place.
-        .onChange(of: [showSidebar, showMargin, showCards, chapterReading, screenplayReading, storyPage]) {
+        .onChange(of: [showSidebar, showMargin]) {
+            Panes.settleSoon(in: store, tries: 6)
+        }
+        .onChange(of: store.viewMode) {
             Panes.settleSoon(in: store, tries: 6)
         }
         .onGeometryChange(for: CGFloat.self, of: { $0.size.width }) { width in
@@ -349,6 +348,12 @@ struct ContentView: View {
 
     // MARK: - Toolbar
 
+    /// The view the open document is shown in: read or write, contents or page, or the cards.
+    /// The store remembers it for that document.
+    private var viewMode: Binding<ViewModes.Mode> {
+        Binding(get: { store.viewMode }, set: { store.setViewMode($0) })
+    }
+
     /// Left: the contents toggle and the path. Right: Find, Comment, and the margin toggle.
     /// Frameless buttons with SF Symbols. `sharedBackgroundVisibility(.hidden)`
     /// stops macOS drawing its glass capsule behind each item. While you type, the contents
@@ -389,14 +394,13 @@ struct ContentView: View {
             Group {
                 switch store.selection {
                 case .chapter:
-                    ViewSwitch(showCards: $showCards, first: ("Read", "Write"), isFirst: $chapterReading)
+                    ViewSwitch(mode: viewMode, pages: ViewModes.Mode.chapterPages)
                 case .scene(let url) where url.pathExtension.lowercased() == ProseFile.fountain:
                     // A screenplay: its pages, or the script to write. No cards.
-                    ViewSwitch(showCards: .constant(false), first: ("Read", "Write"), isFirst: $screenplayReading, cards: false)
+                    ViewSwitch(mode: viewMode, pages: [("Read", .read), ("Write", .write)], cards: false)
                 case .book(let url) where store.openBook != nil:
                     // A single document or a screenplay has no cards.
-                    ViewSwitch(showCards: $showCards, first: ("Contents", "Page"), isFirst: Binding(
-                        get: { !storyPage }, set: { storyPage = !$0 }),
+                    ViewSwitch(mode: viewMode, pages: ViewModes.Mode.storyPages,
                                cards: store.book(for: url).map(BookCardsView.hasCards) ?? true)
                 default:
                     EmptyView()
@@ -519,29 +523,30 @@ struct WindowChrome: NSViewRepresentable {
 
 /// Read, Write or Cards for a chapter (Read sets it like the book, Write is the same chapter
 /// for editing); Contents, Page or Cards for a story (its contents page, the whole story to
-/// read, or its cards). Square segments in a hairline frame.
+/// read, or its cards). Square segments in a hairline frame. Which one is showing is
+/// remembered for each document (owner, 2026-11-15).
 struct ViewSwitch: View {
-    @Binding var showCards: Bool
-    /// The two pages before Cards, and whether the first is the one shown.
-    let first: (String, String)
-    @Binding var isFirst: Bool
+    @Binding var mode: ViewModes.Mode
+    /// The two page views, in the order they are shown.
+    let pages: [(title: String, mode: ViewModes.Mode)]
     /// Whether Cards is offered (not for a screenplay).
     var cards = true
 
     var body: some View {
         HStack(spacing: 0) {
-            segment(first.0, on: !showCards && isFirst) { showCards = false; isFirst = true }
-            Rectangle().fill(Color(PaperTheme.controlBorder)).frame(width: 1)
-            segment(first.1, on: !showCards && !isFirst) { showCards = false; isFirst = false }
+            ForEach(Array(pages.enumerated()), id: \.offset) { index, page in
+                if index > 0 { Rectangle().fill(Color(PaperTheme.controlBorder)).frame(width: 1) }
+                segment(page.title, on: mode == page.mode) { mode = page.mode }
+            }
             if cards {
                 Rectangle().fill(Color(PaperTheme.controlBorder)).frame(width: 1)
-                segment("Cards", on: showCards) { showCards = true }
+                segment("Cards", on: mode == .cards) { mode = .cards }
             }
         }
         .frame(height: Layout.controlHeight)
         .background(Color(PaperTheme.controlFill))
         .roundedFrame(Color(PaperTheme.controlBorder), lineWidth: 1)
-        .help(cards ? "\(first.0), \(first.1) or Cards" : "\(first.0) or \(first.1)")
+        .help(cards ? "\(pages[0].title), \(pages[1].title) or Cards" : "\(pages[0].title) or \(pages[1].title)")
     }
 
     private func segment(_ title: String, on: Bool, action: @escaping () -> Void) -> some View {

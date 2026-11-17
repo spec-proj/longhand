@@ -2,10 +2,8 @@ import SwiftUI
 
 struct DetailView: View {
     @EnvironmentObject private var store: LibraryStore
-    /// Chapters and books show as cards rather than pages.
-    @AppStorage("showCards") private var showCards = false
-    @AppStorage(StoryPage.key) private var storyPage = false
-    @AppStorage(ScreenplayReader.readingKey) private var screenplayReading = false
+    /// The view the open document is shown in: the cards, or the page.
+    private var viewMode: ViewModes.Mode { store.viewMode }
 
     var body: some View {
         Group {
@@ -13,7 +11,7 @@ struct DetailView: View {
             case .scene(let url):
                 if let scene = store.scene(for: url), let version = store.historyPreview {
                     HistoryPreview(scene: scene, version: version)
-                } else if let scene = store.scene(for: url), scene.isScreenplay, screenplayReading {
+                } else if let scene = store.scene(for: url), scene.isScreenplay, viewMode == .read {
                     ScreenplayReader(scene: scene)
                 } else if let scene = store.scene(for: url) {
                     SceneEditorView(scene: scene)
@@ -22,7 +20,7 @@ struct DetailView: View {
                 }
 
             case .chapter(let url):
-                if let chapter = store.chapter(for: url), showCards {
+                if let chapter = store.chapter(for: url), viewMode == .cards {
                     ChapterCardsView(chapter: chapter)
                 } else if let chapter = store.chapter(for: url) {
                     // One page for every chapter: switching chapters, or adding, renaming or
@@ -38,9 +36,9 @@ struct DetailView: View {
                 // cards (or, with Page chosen, its contents page).
                 if let book = store.book(for: url), store.openBook == nil {
                     BookInfoPage(book: book)
-                } else if let book = store.book(for: url), showCards, BookCardsView.hasCards(book) {
+                } else if let book = store.book(for: url), viewMode == .cards, BookCardsView.hasCards(book) {
                     BookCardsView(book: book)
-                } else if let book = store.book(for: url), storyPage {
+                } else if let book = store.book(for: url), viewMode == .page {
                     StoryPage(book: book)
                 } else if let book = store.book(for: url) {
                     BookOverview(book: book)
@@ -408,8 +406,8 @@ struct ChapterDocumentView: View {
     /// list of scenes) changes.
     @State private var loaded: (key: [URL], scenes: [ChapterSceneText]) = ([], [])
     /// Read (set like the book) or Write (the same chapter, editable): the toolbar's switch.
-    @AppStorage(ChapterDocumentView.readingKey) private var reading = true
-    static let readingKey = "chapterReading"
+    /// The view is remembered for this chapter (owner, 2026-11-15).
+    private var reading: Bool { store.viewMode == .read }
 
     private var key: [URL] { [chapter.url] + chapter.scenes.map(\.url) }
 
@@ -457,7 +455,7 @@ struct ChapterDocumentView: View {
         .onChange(of: store.reloadCount) { load() }
         .onChange(of: key) { load() }
         // Either way shows what is on disk: write out anything typed, then read it again.
-        .onChange(of: reading) { store.saveNow(); load() }
+        .onChange(of: store.viewMode) { store.saveNow(); load() }
     }
 
     /// The names in this chapter's story (a notebook: folders and notes).
@@ -500,15 +498,17 @@ struct StoryPage: View {
     @ObservedObject private var authors = AuthorProfiles.shared
     let book: Book
 
-    /// Contents (false) or Page (true), beside Cards.
-    static let key = "storyPage"
-
     /// The texts, read from disk when the story or its chapters change.
-    @State private var loaded: (key: [URL], chapters: [ReadingChapter]) = ([], [])
+    @State private var loaded: (key: [URL], chapters: [ReadingChapter], script: String) = ([], [], "")
 
     private var key: [URL] { [book.url] + book.chapters.flatMap { [$0.url] + $0.scenes.map(\.url) } }
 
     private var chapters: [ReadingChapter] { loaded.key == key ? loaded.chapters : texts() }
+
+    /// A screenplay's own text, read with the rest (its story page shows the script).
+    private var script: String {
+        loaded.key == key ? loaded.script : (book.document.map { store.fileText(at: $0.url) } ?? "")
+    }
 
     private var heading: StoryHeading {
         let info = margin.info(for: book.url)
@@ -519,7 +519,14 @@ struct StoryPage: View {
 
     var body: some View {
         Group {
-            if book.chapters.allSatisfy(\.scenes.isEmpty) {
+            if book.isScreenplay, let document = book.document {
+                // A screenplay is shown as pages, never as plain prose.
+                ScreenplayStoryPage(book: book, script: document, text: script, margin: margin,
+                                    titlePage: { [weak store] made in
+                                        guard let store else { return nil }
+                                        return Exporter.screenplayTitlePage(of: book, document: made, store: store)
+                                    })
+            } else if book.chapters.allSatisfy(\.scenes.isEmpty) {
                 Text("Nothing written yet")
                     .font(.system(size: Layout.chromeSize))
                     .foregroundStyle(Color(PaperTheme.secondary))
@@ -535,7 +542,9 @@ struct StoryPage: View {
         .onChange(of: key) { load() }
     }
 
-    private func load() { loaded = (key, texts()) }
+    private func load() {
+        loaded = (key, texts(), book.document.map { store.fileText(at: $0.url) } ?? "")
+    }
 
     private func texts() -> [ReadingChapter] {
         var id = 0

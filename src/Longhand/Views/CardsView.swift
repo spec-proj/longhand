@@ -69,15 +69,31 @@ enum CardSize: String, CaseIterable, Identifiable {
     /// A chapter's column on the story's board, and a card's least height there.
     var columnWidth: CGFloat { switch self { case .small: 200; case .medium: 240; case .large: 300 } }
     var columnMinHeight: CGFloat { switch self { case .small: 72; case .medium: 96; case .large: 132 } }
-    func synopsisLines(compact: Bool) -> Int {
-        switch self {
-        case .small: return 2
-        case .medium: return compact ? 3 : 5
-        case .large: return compact ? 6 : 9
-        }
-    }
+    /// How many lines of synopsis a card shows at most: the card grows to hold them, so a
+    /// long one is never cut in the middle of a line.
+    static let synopsisLines = 12
     var titleSize: CGFloat { self == .small ? Layout.chromeSize : 15 }
     var synopsisSize: CGFloat { self == .small ? Layout.detailSize : Layout.chromeSize }
+
+    /// The height of a line of synopsis.
+    var lineHeight: CGFloat { ceil(synopsisSize * 1.2) + 2 }
+
+    /// How many lines of synopsis fit on a card of this size: the number, the title (on two
+    /// lines, the most it takes) and the word count have their room first.
+    var fitLines: Int {
+        let content = height - 14 - 12
+        let used = 17 + 2 * ceil(titleSize * 1.2) + 4 * 6 + 17
+        return max(0, Int((content - used) / lineHeight))
+    }
+
+    /// How many lines a synopsis takes at this width: the card is made tall enough for it.
+    func linesNeeded(width: CGFloat, text: String) -> Int {
+        guard !text.isEmpty else { return 0 }
+        let font = NSFont.systemFont(ofSize: synopsisSize)
+        let bounds = (text as NSString).boundingRect(with: NSSize(width: max(width, 40), height: .greatestFiniteMagnitude),
+                                                     options: [.usesLineFragmentOrigin], attributes: [.font: font])
+        return max(1, Int((bounds.height / lineHeight).rounded(.up)))
+    }
 }
 
 /// What is being dragged, and where a dropped card lands.
@@ -212,6 +228,10 @@ private struct CardBoard: View {
     @State private var endTargeted: URL?
     /// A card just made, to edit once it is on the board.
     @State private var pendingEdit: URL?
+    /// The column the pointer is over: its New Scene shows while it is there.
+    @State private var hovering: URL?
+    /// The pointer is over the board itself (the grid's own New Scene).
+    @State private var hoveringBoard = false
 
     private var size: CardSize { CardSize(rawValue: sizeName) ?? .medium }
     private var hidesNumbers: Bool { margin.info(for: book.url).hideChapterNumbers == true }
@@ -327,14 +347,23 @@ private struct CardBoard: View {
     }
 
     private func grid(_ items: [CardItem], width: CGFloat) -> some View {
-        let columns = Array(repeating: GridItem(.flexible(), spacing: 16, alignment: .top), count: gridColumns(width))
+        let columns = gridColumns(width)
         let urls = items.map(\.id)
+        // The width a card's text has: the column's width, less the card's own padding.
+        let cell = (width - 64 - 16 * CGFloat(columns - 1)) / CGFloat(columns) - 32
+        // The cards are as tall as the longest synopsis needs, so no card is cut short and
+        // they still line up.
+        let lines = min(CardSize.synopsisLines, items.map {
+            size.linesNeeded(width: cell, text: margin.info(for: $0.id).synopsis)
+        }.max() ?? 0)
+        let height = size.height + CGFloat(max(0, lines - size.fitLines)) * size.lineHeight
         return ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 header.padding(.bottom, 24)
-                LazyVGrid(columns: columns, alignment: .leading, spacing: 16) {
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 16, alignment: .top), count: columns),
+                          alignment: .leading, spacing: 16) {
                     ForEach(items) { item in
-                        card(item, list: urls, axis: .horizontal)
+                        card(item, list: urls, axis: .horizontal, lines: lines, height: height)
                     }
                 }
                 newButton.padding(.top, 16)
@@ -346,6 +375,8 @@ private struct CardBoard: View {
         .scrollIndicators(.never)
         .contentShape(Rectangle())
         .onTapGesture { finishEditing(); takeKeys() }
+        // The board's own New Scene shows while the pointer is over it.
+        .onHover { hoveringBoard = $0 }
         // The empty part of the board: dropped cards go last.
         .dropDestination(for: String.self) { payloads, _ in
             guard let payload = payloads.first else { return false }
@@ -353,15 +384,20 @@ private struct CardBoard: View {
         }
     }
 
+    /// The board's own New Scene (or New Chapter, in a chapters-only story): it shows while
+    /// the pointer is over the board.
     @ViewBuilder private var newButton: some View {
         switch kind {
         case .chapters(let book):
             addButton("New \(names.chapter)") { startNew(store.createChapter(in: book.url, open: false)) }
+                .opacity(hoveringBoard ? 1 : 0)
         case .chapter(let chapter):
             addButton("New \(names.scene)") { startNew(store.createScene(inChapter: chapter.url, open: false)) }
+                .opacity(hoveringBoard ? 1 : 0)
         case .loose(let book):
             if let chapter = book.chapters.first {
                 addButton("New \(names.scene)") { startNew(store.createScene(inChapter: chapter.url, open: false)) }
+                    .opacity(hoveringBoard ? 1 : 0)
             }
         case .book:
             EmptyView()
@@ -395,6 +431,8 @@ private struct CardBoard: View {
                     ForEach(Array(lists.enumerated()), id: \.element.chapter.id) { index, list in
                         column(list.chapter, items: list.items, number: hidesNumbers ? nil : index + 1, chapters: chapterURLs)
                     }
+                    // The last column: a new chapter (owner, 2026-11-15).
+                    newChapterColumn
                 }
                 .padding(.horizontal, 32)
                 .padding(.bottom, 32)
@@ -407,12 +445,23 @@ private struct CardBoard: View {
         .onTapGesture { finishEditing(); takeKeys() }
     }
 
+    /// The board's last column: a new chapter, level with the chapter headings.
+    private var newChapterColumn: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Color.clear.frame(height: 24)
+            addButton("New \(names.chapter)") { store.createChapter(in: book.url) }
+            Spacer(minLength: 0)
+        }
+        .frame(width: size.columnWidth)
+    }
+
     private func column(_ chapter: Chapter, items: [CardItem], number: Int?, chapters: [URL]) -> some View {
         let urls = items.map(\.id)
         return VStack(alignment: .leading, spacing: 10) {
             ChapterColumnHeader(chapter: chapter, number: number, words: store.wordCount(of: chapter),
                                 chapters: chapters, onOpen: { store.selection = .chapter(chapter.url) },
-                                onDrop: { dropOnChapter($0, chapter: chapter, chapters: chapters) })
+                                onDrop: { dropOnChapter($0, chapter: chapter, chapters: chapters) },
+                                onCut: { store.moveChapterToBoneyard(chapter.url) })
                 .padding(.bottom, 4)
 
             ForEach(items) { item in
@@ -435,19 +484,27 @@ private struct CardBoard: View {
                     return dropAtEnd(payload, of: chapter)
                 } isTargeted: { endTargeted = $0 ? chapter.url : (endTargeted == chapter.url ? nil : endTargeted) }
 
+            // New scene, under the column: it shows while the pointer is over the column.
             addButton("New \(names.scene)") { startNew(store.createScene(inChapter: chapter.url, open: false)) }
                 .foregroundStyle(Color(PaperTheme.secondary))
+                .opacity(hovering == chapter.url ? 1 : 0)
         }
         .frame(width: size.columnWidth)
+        .onHover { over in
+            hovering = over ? chapter.url : (hovering == chapter.url ? nil : hovering)
+        }
     }
 
     // MARK: A card
 
-    private func card(_ item: CardItem, list: [URL], axis: Axis) -> some View {
+    private func card(_ item: CardItem, list: [URL], axis: Axis, lines: Int = CardSize.synopsisLines,
+                      height: CGFloat? = nil) -> some View {
         BoardCard(
             item: item,
             size: size,
             compact: axis == .vertical,
+            synopsisLines: lines,
+            height: height,
             selected: margin.sceneURL == item.id,
             comments: margin.openCounts[item.id] ?? 0,
             info: margin.info(for: item.id),
@@ -691,6 +748,8 @@ private struct ChapterColumnHeader: View {
     let chapters: [URL]
     let onOpen: () -> Void
     let onDrop: (String) -> Bool
+    /// Sends the whole chapter to the Boneyard.
+    var onCut: (() -> Void)?
     @State private var targeted = false
 
     var body: some View {
@@ -730,6 +789,11 @@ private struct ChapterColumnHeader: View {
                 .offset(x: landsAfter ? 9 : -9)
         }
         .background(targeted && CardDrag.payload.flatMap(CardDrag.scene(in:)) != nil ? Color(PaperTheme.selection) : .clear)
+        .contextMenu {
+            if let onCut {
+                Button("Move to Boneyard", role: .destructive, action: onCut)
+            }
+        }
     }
 
     private var landsAfter: Bool {
@@ -744,6 +808,10 @@ private struct BoardCard: View {
     let item: CardItem
     let size: CardSize
     let compact: Bool
+    /// How many lines of synopsis the card shows.
+    let synopsisLines: Int
+    /// The card's height, when it is fixed (a grid's cards are all the same height).
+    let height: CGFloat?
     let selected: Bool
     let comments: Int
     let info: SceneInfo
@@ -791,7 +859,7 @@ private struct BoardCard: View {
                        label: info.label, onCommit: onCommit, onCancel: onCancel, onEnd: onEnd)
         } else {
             SceneCard(title: item.title, number: item.number, info: info, words: words, comments: comments,
-                      selected: selected, size: size, compact: compact)
+                      selected: selected, size: size, compact: compact, synopsisLines: synopsisLines, height: height)
         }
     }
 
@@ -831,6 +899,10 @@ struct SceneCard: View {
     let selected: Bool
     var size: CardSize = .medium
     let compact: Bool
+    /// How many lines of synopsis the card shows.
+    var synopsisLines: Int = CardSize.synopsisLines
+    /// The card's height, when it is fixed (a grid's cards are all the same height).
+    var height: CGFloat?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -852,14 +924,16 @@ struct SceneCard: View {
                     .font(.system(size: size.synopsisSize))
                     .foregroundStyle(Color(PaperTheme.ink).opacity(0.78))
                     .lineSpacing(2)
-                    .lineLimit(size.synopsisLines(compact: compact))
+                    .lineLimit(synopsisLines)
+                    .truncationMode(.tail)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             Spacer(minLength: 0)
 
             CardFoot(words: words, target: info.target)
         }
-        .cardFrame(size: size, compact: compact, label: info.label, selected: selected)
+        .cardFrame(size: size, compact: compact, label: info.label, selected: selected, height: height)
     }
 }
 
@@ -899,13 +973,13 @@ private struct CommentCount: View {
 
 private extension View {
     /// A card's paper, size, label band and frame.
-    func cardFrame(size: CardSize, compact: Bool, label: CardLabel?, selected: Bool) -> some View {
+    func cardFrame(size: CardSize, compact: Bool, label: CardLabel?, selected: Bool, height: CGFloat? = nil) -> some View {
         padding(.horizontal, compact ? 12 : 16)
             .padding(.top, (compact ? 10 : 14) + (label == nil ? 0 : 3))
             .padding(.bottom, compact ? 10 : 12)
             .frame(maxWidth: .infinity,
-                   minHeight: compact ? size.columnMinHeight : size.height,
-                   maxHeight: compact ? nil : size.height,
+                   minHeight: compact ? size.columnMinHeight : (height ?? size.height),
+                   maxHeight: compact ? nil : (height ?? size.height),
                    alignment: .topLeading)
             .background(Color(PaperTheme.card))
             .overlay(alignment: .top) {

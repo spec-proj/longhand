@@ -184,12 +184,18 @@ card, dragging chapters, dragging to the Boneyard).
 - **A story of chapters and scenes:** one column per chapter (number, title, words), cards
   stacked, `+ New Scene` under every column; an empty chapter keeps a dashed drop box. The
   heading (title, chapters, words, the target's box and rule) stays put above the columns,
-  which scroll sideways. Drag a column's heading onto another to move the chapter.
+  which scroll sideways. Drag a column's heading onto another to move the chapter. **A last
+  column: `+ New Chapter`.**
 - **Sizes:** Small, Medium, Large: a three-segment switch of SF Symbols at the heading's right
   (square.grid.3x3, square.grid.2x2, square), View › Card Size and the palette's Card Size.
 - **A card:** white, hairline frame (ink when chosen), 4pt corners. Its label's colour as a 4pt
   band across the top; number, open comments (the contents' chat box) and status on top; the
   title; the synopsis; at the foot the word count with a progress rule when there's a target.
+  **The synopsis is shown whole** (as many lines as it takes, twelve at the most): a grid's
+  cards are all as tall as the longest synopsis needs, so no card is cut short and they still
+  line up; a column's cards grow as they must.
+- **`+ New Scene` shows while the pointer is over the board** (owner, 2026-11-15): the grid's
+  own button while the pointer is over the grid, the column's while it is over that column.
 - **Labels:** Red, Orange, Yellow, Green, Blue, Purple, Grey (Label › on the card's menu); the
   writer's own meaning.
 - Click chooses a card at once (its details in the margin, its row marked in the contents);
@@ -202,7 +208,8 @@ card, dragging chapters, dragging to the Boneyard).
   the side, beside a card in a grid, above or below in a column. The empty end of a chapter
   puts it last. The contents' **Boneyard tab takes a dropped card** (or scene row) and cuts it.
 - Right-click a card: Open, Edit Card, Status ›, Label ›, Move To › (chapters), Move to
-  Boneyard, Show in Finder, Move to Trash.
+  Boneyard, Show in Finder, Move to Trash. Right-click a chapter's heading on the story's
+  board: Move to Boneyard.
 
 ### Book Info page (owner, 2026-11-08)
 
@@ -234,6 +241,10 @@ The form:
   (title, byline), then each chapter as its Read view sets it, a chapter starting well down
   as on a new page, its notes after it. Comments show and are listed beside it as in Read.
   ⌘R switches Contents and Page. 85,000 words set in ~85 ms.
+- **Each document remembers its own view** (owner, 2026-11-15: "views remember which type of
+  view you had open in doc"): a chapter opened again is shown the way it was left (Read,
+  Write or the cards), and so is a story (Contents, Page or the cards). The choice is kept in
+  the settings, not in the library: it is how the writer likes to look at their work.
 - **Library or inside a book (owner, 2026-11-08):** the Book Info page belongs to the Library.
   There, a click on a book shows its Book Info page; a double-click, the row's › or Return goes
   into it. Inside a book, its header (cover or icon, name, badge, no word counts) opens the
@@ -496,6 +507,11 @@ Mock-up: https://claude.ai/artifact/B1xNrBZmLp5y8DGpmCkwCD.
   ink, the chosen one in ink on the selection band; at the right its old number ("1.3") or,
   for a passage, the day it was cut. Right-click: Restore, Restore To ›, Show in Finder, Move
   to Trash. A scene's own menu gains Move to Boneyard.
+- **A chapter can be cut too** (owner, 2026-11-15): **⇧⌘⌫** sends what is chosen to the
+  Boneyard — the scene open, the chapter open, or the passage selected on the page of a single
+  document (File › Move to Boneyard; the palette says the same). A cut chapter is kept whole,
+  as a folder in the story's Boneyard; it is out of the manuscript, counts and export, and the
+  chapters that stay are numbered as they stand. Restore puts it back where it was.
 - **Standard names** (owner: "Restore instead of Bring Back… standard obvious nomenclature").
 - **Page:** under the header, a 40pt strip on the chrome grey: "Cut from **Low Water** (scene
   1.3) on 14 Nov", then **Restore** (primary) and **Restore To** (a menu of chapters).
@@ -525,9 +541,11 @@ Mock-up: https://claude.ai/artifact/B1xNrBZmLp5y8DGpmCkwCD.
   key: the symbols stay visible and dimmed.
 - **⌘A on a chapter page** selects the scene the caret is in, then every scene; never the
   chapter's title.
-- **Help › Cheat Sheet (⌘/):** two columns: the shortcuts by Go, Write and View, each with its key caps; then Markdown. Formerly a 330pt framed card at the top right of the page,
-  what you type (monospaced, secondary) beside what it makes (set as it will look) and the
-  shortcut. It doesn't take the keyboard; ⌘/ again, Escape or ✕ puts it away.
+- **Help › Cheat Sheet (⌘/):** a card in the middle of the window: **three columns of
+  shortcuts** — Move around, Write, View — each with its key caps at the right of the row,
+  and **Markdown below** (or a screenplay's own marks, while a screenplay is open): what you
+  type beside what it makes, three pairs to a line. It doesn't take the keyboard; ⌘/ again,
+  Escape or ✕ puts it away.
 - **Settings (⌘,):** three panes on the grey, chosen by segments at the top; the window is
   as tall as the pane, and a pane's name isn't repeated as a heading inside it.
   **Appearance:** Mode (System / Light / Dark; switched off for Dracula, which is dark only

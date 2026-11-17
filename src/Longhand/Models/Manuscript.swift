@@ -68,6 +68,9 @@ struct Book: Identifiable, Equatable {
     /// Cut scenes and passages, kept in the story's `Boneyard` folder (owner, 2026-11-14): out
     /// of `chapters`, so out of the manuscript, counts and export.
     var boneyard: Chapter?
+    /// Cut chapters, kept in the same folder as folders of their own (owner, 2026-11-15: a
+    /// chapter can be sent to the Boneyard too). Out of the manuscript, like the cut scenes.
+    var boneyardChapters: [Chapter] = []
 
     /// A scenes-only story or a single document: its files, straight in its folder.
     var looseScenes: [Scene] { chapters.first(where: \.implicit)?.scenes ?? [] }
@@ -86,7 +89,8 @@ struct Chapter: Identifiable, Equatable {
     /// Not a folder of its own: the story's folder, holding a scenes-only story's scenes or a
     /// single document. Never shown as a chapter.
     var implicit = false
-    /// The story's Boneyard folder (`Book.boneyard`), never one of its chapters.
+    /// The story's Boneyard folder (`Book.boneyard`), or a cut chapter kept there: never one
+    /// of the story's chapters.
     var boneyard = false
 }
 
