@@ -4,8 +4,9 @@ import AppKit
 // MARK: - Command palette
 
 /// ⌘K: type part of a scene, chapter or book title, or of a command, then Return. With
-/// nothing typed it lists scenes; commands come up as you type ("new", "focus", "theme").
-/// Arrow keys move the choice; Escape or a click outside closes it.
+/// nothing typed it lists the commands this screen is for (no scenes: ⌘L switches those);
+/// scenes and commands come up as you type ("new", "focus", "theme"). Arrow keys move the
+/// choice; Escape or a click outside closes it.
 struct QuickOpen: View {
     @EnvironmentObject private var store: LibraryStore
     /// Its group, query and choice: the store's, so a previewed theme (which draws the window
@@ -21,11 +22,34 @@ struct QuickOpen: View {
         let command: Bool
         /// A group's items (owner, 2026-11-13: "Theme › [list of themes]").
         var children: [Item]? = nil
+        /// Shown when the palette opens, before anything is typed: the few things most
+        /// summonings are for.
+        var greets = false
         /// Ticked: the theme in use, the branch you're on.
         var current = false
         /// A theme: shown with its colours, and previewed while it is the choice.
         var theme: AppTheme? = nil
         var run: @MainActor () -> Void = {}
+    }
+
+    /// A run of rows under a small grey heading ("Scenes", "Commands"), as other command
+    /// palettes have them (owner, 2026-11-16, issue #11). A lone group carries no heading:
+    /// it would say nothing the rows don't.
+    struct Section: Identifiable {
+        var title: String? = nil
+        let items: [Item]
+        var id: String { title ?? "" }
+    }
+
+    /// One drawn row: a heading, or a choice with its place in `matches` (the arrow keys and
+    /// Return go by that, so headings are stepped over).
+    struct Row: Identifiable {
+        static let height: CGFloat = 34
+        static let headingHeight: CGFloat = 24
+        let id: String
+        var heading: String? = nil
+        var item: Item? = nil
+        var index: Int? = nil
     }
 
     var body: some View {
@@ -67,65 +91,78 @@ struct QuickOpen: View {
                 }
                 .padding(.horizontal, 14)
                 .frame(height: 44)
-                let items = matches
-                if !items.isEmpty {
+                let layout = rows
+                if !layout.isEmpty {
                     Rectangle().fill(Color(PaperTheme.hairline)).frame(height: 1)
                     // A group can hold more than fits (Theme): it scrolls, nine rows high.
                     ScrollViewReader { scroller in
                     ScrollView {
                     VStack(spacing: 0) {
-                        ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
-                            Button {
-                                palette.chosen = index
-                                open()
-                            } label: {
-                                HStack {
-                                    if palette.group != nil {
-                                        Symbol.checkmark.view(size: 11)
-                                            .foregroundStyle(Color(PaperTheme.ink))
-                                            .opacity(item.current ? 1 : 0)
-                                            .frame(width: 14)
-                                    }
-                                    if let theme = item.theme {
-                                        // The theme's own colours (its dark ones in a dark window).
-                                        Image(nsImage: ThemeStrip.image(theme, dark: scheme == .dark))
-                                    }
-                                    Text(item.title)
-                                        .foregroundStyle(Color(PaperTheme.ink))
-                                        .lineLimit(1)
-                                    Spacer(minLength: 12)
-                                    if item.children != nil {
-                                        Symbol.caretRight.view(size: 11)
-                                            .foregroundStyle(Color(PaperTheme.secondary))
-                                    } else if item.command {
-                                        // The shortcut as key caps, like the cheat sheet's.
-                                        HStack(spacing: 3) {
-                                            ForEach(Array(Key.caps(item.detail).enumerated()), id: \.offset) { KeyCap(key: $0.element) }
+                        ForEach(layout) { row in
+                            if let heading = row.heading {
+                                Text(heading)
+                                    .font(.system(size: Layout.detailSize, weight: .medium))
+                                    .foregroundStyle(Color(PaperTheme.secondary))
+                                    .lineLimit(1)
+                                    .padding(.horizontal, 14)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .frame(height: Row.headingHeight, alignment: .bottom)
+                                    .id(row.id)
+                            } else if let item = row.item, let index = row.index {
+                                Button {
+                                    palette.chosen = index
+                                    open()
+                                } label: {
+                                    HStack {
+                                        if palette.group != nil {
+                                            Symbol.checkmark.view(size: 11)
+                                                .foregroundStyle(Color(PaperTheme.ink))
+                                                .opacity(item.current ? 1 : 0)
+                                                .frame(width: 14)
                                         }
-                                    } else {
-                                        Text(item.detail)
-                                            .font(.system(size: Layout.detailSize).monospacedDigit())
-                                            .foregroundStyle(Color(PaperTheme.secondary))
+                                        if let theme = item.theme {
+                                            // The theme's own colours (its dark ones in a dark window).
+                                            Image(nsImage: ThemeStrip.image(theme, dark: scheme == .dark))
+                                        }
+                                        Text(item.title)
+                                            .foregroundStyle(Color(PaperTheme.ink))
                                             .lineLimit(1)
+                                        Spacer(minLength: 12)
+                                        if item.children != nil {
+                                            Symbol.caretRight.view(size: 11)
+                                                .foregroundStyle(Color(PaperTheme.secondary))
+                                        } else if item.command {
+                                            // The shortcut as key caps, like the cheat sheet's.
+                                            HStack(spacing: 3) {
+                                                ForEach(Array(Key.caps(item.detail).enumerated()), id: \.offset) { KeyCap(key: $0.element) }
+                                            }
+                                        } else {
+                                            Text(item.detail)
+                                                .font(.system(size: Layout.detailSize).monospacedDigit())
+                                                .foregroundStyle(Color(PaperTheme.secondary))
+                                                .lineLimit(1)
+                                        }
                                     }
+                                    .font(.system(size: Layout.chromeSize))
+                                    .padding(.horizontal, 14)
+                                    .frame(height: Row.height)
+                                    .background(index == palette.chosen ? Color(PaperTheme.selection) : Color.clear)
+                                    .contentShape(Rectangle())
                                 }
-                                .font(.system(size: Layout.chromeSize))
-                                .padding(.horizontal, 14)
-                                .frame(height: 34)
-                                .background(index == palette.chosen ? Color(PaperTheme.selection) : Color.clear)
-                                .contentShape(Rectangle())
+                                .buttonStyle(.plain)
+                                .onHover { if $0 { hover(index) } }
+                                .id(row.id)
                             }
-                            .buttonStyle(.plain)
-                            .onHover { if $0 { hover(index) } }
-                            .id(index)
                         }
                     }
                     }
                     .scrollIndicators(.automatic)
-                    .frame(height: min(CGFloat(items.count), 9) * 34)
-                    .onChange(of: palette.chosen) { _, index in scroller.scrollTo(index) }
+                    // As tall as whole rows allow, nine rows at most: a heading never gets
+                    // cut through the middle.
+                    .frame(height: visibleHeight(of: layout))
+                    .onChange(of: palette.chosen) { _, index in scroll(scroller, to: index) }
                     // Drawn again for a previewed theme: back where the choice was.
-                    .onAppear { if palette.chosen > 0 { scroller.scrollTo(palette.chosen) } }
+                    .onAppear { scroll(scroller, to: palette.chosen) }
                     }
                 }
             }
@@ -152,23 +189,33 @@ struct QuickOpen: View {
         func flip(_ key: String) { defaults.set(!defaults.bool(forKey: key), forKey: key) }
         // The side columns are shown unless switched off.
         func shown(_ key: String) -> Bool { defaults.object(forKey: key) as? Bool ?? true }
-        func command(_ title: String, _ keys: String = "", _ run: @escaping @MainActor () -> Void) -> Item {
-            Item(id: "do:" + title, title: title, detail: keys, command: true, run: run)
+        func command(_ title: String, _ keys: String = "", greets: Bool = false,
+                     _ run: @escaping @MainActor () -> Void) -> Item {
+            Item(id: "do:" + title, title: title, detail: keys, command: true, greets: greets, run: run)
         }
         func group(_ title: String, _ items: [Item]) -> Item {
             Item(id: "group:" + title, title: title, detail: "", command: true, children: items)
         }
         let versions = store.versions
+        // Whether the page in front of the writer is text they can comment on: a scene or a
+        // chapter, not the cards and not a story's own page.
+        let writing: Bool = {
+            guard store.viewMode != .cards else { return false }
+            switch store.selection {
+            case .scene, .chapter: return true
+            default: return false
+            }
+        }()
         // Inside a story you make scenes and chapters; stories and folders are made in the
         // Library.
         // What a story can take depends on how it is divided (a single document: neither).
         var list: [Item] = store.openBook != nil
-            ? (store.canAddScene ? [command("New \(store.contextNames.scene)", "⌘N") { store.createSceneInContext() }] : [])
-                + (store.canAddChapter ? [command("New \(store.contextNames.chapter)", "⇧⌘N") { store.createChapterInContext() }] : [])
+            ? (store.canAddScene ? [command("New \(store.contextNames.scene)", "⌘N", greets: true) { store.createSceneInContext() }] : [])
+                + (store.canAddChapter ? [command("New \(store.contextNames.chapter)", "⇧⌘N", greets: true) { store.createChapterInContext() }] : [])
                 + [command("Back to Library", "⌘4") { store.showLibrary() }]
             : [
-                command("New Document…", "⌥⌘N") { store.newDocumentShown = true },
-                command("New Folder") { store.createFolder() },
+                command("New Document…", "⌥⌘N", greets: true) { store.newDocumentShown = true },
+                command("New Folder", greets: true) { store.createFolder() },
             ]
         list += [
             command("Import Final Draft…") { store.importFinalDraft() },
@@ -177,8 +224,8 @@ struct QuickOpen: View {
         list += [
             command("Switch Scene…", "⌘L") { store.switcherShown = true },
             command("Switch Document…", "⇧⌘L") { store.documentSwitcherShown = true },
-            command("Find in Library…", "⇧⌘F") { store.searchShown = true },
-            command("Comment on Selection", "⌘J") { Commands.comment(margin: store.margin) },
+            command("Find in Library…", "⇧⌘F", greets: store.openBook == nil) { store.searchShown = true },
+            command("Comment on Selection", "⌘J", greets: writing) { Commands.comment(margin: store.margin) },
             command("Go to Contents", "⌥⌘1") { Panes.focus(.contents, in: store) },
             command("Go to Margin", "⌥⌘2") { Panes.focus(.margin, in: store) },
             command("Go to Page", "⌥⌘3") { Panes.focus(.page, in: store) },
@@ -199,10 +246,10 @@ struct QuickOpen: View {
                 store.contentsTab = store.contentsTab == .boneyard ? .contents : .boneyard
             })
             if case .scene(let url) = store.selection, store.canMoveToBoneyard(url) {
-                list.append(command("Move to Boneyard") { store.moveToBoneyard(url) })
+                list.append(command("Move to Boneyard", greets: true) { store.moveToBoneyard(url) })
             }
             if case .chapter(let url) = store.selection, store.canMoveChapterToBoneyard(url) {
-                list.append(command("Move to Boneyard") { store.moveChapterToBoneyard(url) })
+                list.append(command("Move to Boneyard", greets: true) { store.moveChapterToBoneyard(url) })
             }
             // A single document: the passage selected on the page.
             if case .scene(let url) = store.selection, book.document?.url == url,
@@ -336,24 +383,23 @@ struct QuickOpen: View {
 
     /// Best matches first: titles that start with the palette.query, then ones whose words start with
     /// its words (in any order), then ones that contain it, then ones that contain its
-    /// letters in order. Accents and case are ignored.
-    private var matches: [Item] {
+    /// letters in order. Accents and case are ignored. Scenes and commands are kept apart,
+    /// each under its own heading, the better-matching group first (issue #11).
+    private var sections: [Section] {
         func fold(_ text: String) -> String {
             text.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
         }
         let needle = fold(palette.query.trimmingCharacters(in: .whitespaces))
         // Inside a group: its items, all of them until something is typed.
         if let group = palette.group, let items = commands.first(where: { $0.title == group })?.children {
-            guard !needle.isEmpty else { return items }
-            return items.filter { fold($0.title).contains(needle) || isSubsequence(needle, of: fold($0.title)) }
+            guard !needle.isEmpty else { return [Section(items: items)] }
+            return [Section(items: items.filter { fold($0.title).contains(needle) || isSubsequence(needle, of: fold($0.title)) })]
         }
-        let places = self.places
         guard !needle.isEmpty else {
-            // Nothing typed: the scenes last open, then the library's first ones.
-            let scenes = places.filter { $0.detail.contains("›") }
-            let recent = store.recentScenes.compactMap { url in scenes.first { $0.id == "go:\(Selection.scene(url))" } }
-            let rest = scenes.filter { scene in !recent.contains { $0.id == scene.id } }
-            return Array((recent + rest).prefix(8))
+            // Nothing typed: only what this screen is for — no scenes (⌘L switches those) and
+            // nothing global (owner, 2026-11-18: "clean and simple").
+            let greeting = commands.filter(\.greets).prefix(4)
+            return greeting.isEmpty ? [] : [Section(items: Array(greeting))]
         }
         let words = needle.split(separator: " ")
         func score(_ item: Item) -> Int? {
@@ -378,11 +424,44 @@ struct QuickOpen: View {
                      command: true, current: child.current, theme: child.theme, run: child.run)
             }
         }
-        return (places + commands + nested).compactMap { item in score(item).map { (item, $0) } }
-            .enumerated()
-            .sorted { ($0.element.1, $0.offset) < ($1.element.1, $1.offset) }
-            .prefix(9)
-            .map(\.element.0)
+        // A group's matches in order, and its best score (which decides which group leads).
+        func ranked(_ items: [Item]) -> (items: [Item], best: Int) {
+            let scored = items.compactMap { item in score(item).map { (item, $0) } }
+                .enumerated()
+                .sorted { ($0.element.1, $0.offset) < ($1.element.1, $1.offset) }
+                .map(\.element)
+            return (scored.map(\.0), scored.first?.1 ?? Int.max)
+        }
+        let scenes = ranked(places)
+        let found = ranked(commands + nested)
+        var groups: [(title: String, items: [Item], best: Int)] = []
+        if !scenes.items.isEmpty { groups.append(("Scenes", scenes.items, scenes.best)) }
+        if !found.items.isEmpty { groups.append(("Commands", found.items, found.best)) }
+        if groups.count == 2, groups[1].best < groups[0].best { groups.swapAt(0, 1) }
+        // Two headings only when both groups are there; one group alone keeps the whole list.
+        // Four each with headings, so nine choices and their headings still fit without
+        // scrolling.
+        let cap = groups.count > 1 ? 4 : 9
+        return groups.map { Section(title: groups.count > 1 ? $0.title : nil, items: Array($0.items.prefix(cap))) }
+    }
+
+    /// Every choice in order, headings left out: what the arrows and Return go by.
+    private var matches: [Item] { sections.flatMap(\.items) }
+
+    /// What is drawn: each group's heading over its rows.
+    private var rows: [Row] {
+        var out: [Row] = []
+        var index = 0
+        for section in sections {
+            if let title = section.title {
+                out.append(Row(id: "heading:" + title, heading: title))
+            }
+            for item in section.items {
+                out.append(Row(id: item.id, item: item, index: index))
+                index += 1
+            }
+        }
+        return out
     }
 
     private func isSubsequence(_ needle: String, of text: String) -> Bool {
@@ -431,6 +510,30 @@ struct QuickOpen: View {
         guard at != palette.pointer else { return }
         palette.pointer = at
         if palette.chosen != index { palette.chosen = index }
+    }
+
+    /// Keeps the choice on screen (the scroll view holds headings too, so it goes by id).
+    private func scroll(_ scroller: ScrollViewProxy, to index: Int) {
+        let items = matches
+        guard items.indices.contains(index) else { return }
+        scroller.scrollTo(items[index].id)
+    }
+
+    /// Nine choices fit; a heading comes along without counting as one, and a longer list
+    /// scrolls, cut between rows rather than through one.
+    private func visibleHeight(of rows: [Row]) -> CGFloat {
+        func total(_ rows: [Row]) -> CGFloat {
+            rows.reduce(0) { $0 + ($1.heading == nil ? Row.height : Row.headingHeight) }
+        }
+        guard rows.filter({ $0.heading == nil }).count > 9 else { return total(rows) }
+        let limit = 9 * Row.height
+        var height: CGFloat = 0
+        for row in rows {
+            let next = height + (row.heading == nil ? Row.height : Row.headingHeight)
+            guard next <= limit else { break }
+            height = next
+        }
+        return max(height, Row.height)
     }
 
     private func move(_ step: Int) {

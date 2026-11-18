@@ -414,6 +414,13 @@ commit: Save Version, a draft, or the automatic one on quitting.
   Smaller Text, the cheat sheet, Export, Settings, and "Theme: …" for each theme. Titles that start with the
   text come first, then ones containing it, then ones with its letters in order. Arrows,
   Return, Escape.
+- **Scenes and Commands are two sections** (issue #11), four of each under a heading in
+  secondary grey, detail size, medium (never capitals or tracked letters); the group whose
+  best match ranks higher comes first. **Before anything is typed the palette offers only
+  commands** — the few things the screen in front of you is for (New Scene and New Chapter,
+  Comment on Selection, Move to Boneyard; New Document…, New Folder and Find in Library… in
+  the Library), never scenes: ⌘L is for those. A group on its own has no heading — it would
+  say what the rows already do. A longer list (Theme, a branch list) scrolls.
 - **⌘K again closes the palette.** The palette, the switchers and the cheat sheet never stack:
   opening one puts the others away. The switchers keep what is typed (it used to reach the
   page behind).
