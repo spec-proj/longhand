@@ -1469,7 +1469,14 @@ enum SelfTest {
                   "export: chapter numbers only when the story's numbers are on")
 
             let older = try? JSONDecoder().decode(SceneInfo.self, from: Data(#"{"stage":"manuscript"}"#.utf8))
-            check(older?.stage == .finished, "book info: a book saved as Manuscript reads as Finished")
+            check(older?.stage == .final, "book info: a book saved as Manuscript reads as Final")
+            let staged = ["draft": BookStage.writing, "drafted": .draft, "idea": .sketch, "sketch": .sketch, "manuscript": .final]
+            check(staged.allSatisfy { name, stage in
+                      (try? JSONDecoder().decode(SceneInfo.self, from: Data(#"{"stage":"\#(name)"}"#.utf8)))?.stage == stage }
+                  && BookStage.allCases.map(\.title) == ["Sketch", "Writing", "Draft", "Final"]
+                  && BookStage.allCases.allSatisfy { stage in
+                      (try? JSONDecoder().decode(BookStage.self, from: JSONEncoder().encode(stage))) == stage },
+                  "stages: Sketch, Writing, Draft, Final; a story saved as Idea reads as Sketch, older names keep their meaning")
 
             // The author moves from the old export choices to Book Info, once.
             var cleared = store.margin.info(for: book.url)
@@ -2759,6 +2766,9 @@ enum SelfTest {
             store.margin.removeCover(of: book.url)
             check(store.margin.cover(of: book.url) == nil && store.margin.coverSource(of: book.url) == nil,
                   "cover: removing it removes the kept picture too")
+            store.margin.setCover(of: book.url, from: file, cropTo: CGRect(x: 0, y: 0, width: 125.0 / 300, height: 1))
+            check(middle(store.margin.cover(of: book.url)).red > 0.8, "cover: setting with cropTo crops on initial set")
+            store.margin.removeCover(of: book.url)
             try? fm.removeItem(at: file)
         }
 
@@ -2930,6 +2940,12 @@ enum SelfTest {
             func items(_ menu: NSMenu?) -> [NSMenuItem] { (menu?.items ?? []).flatMap { [$0] + items($0.submenu) } }
             let close = items(NSApp.mainMenu).first { $0.keyEquivalent == "w" && $0.keyEquivalentModifierMask == .command }
             check(close?.title == "Close Window", "menus: ⌘W is Close Window")
+            let find = items(NSApp.mainMenu).first { $0.keyEquivalent == "f" && $0.keyEquivalentModifierMask == .command }
+            check(find?.title == "Find…", "menus: ⌘F is Find…")
+            let findNext = items(NSApp.mainMenu).first { $0.keyEquivalent == "g" && $0.keyEquivalentModifierMask == .command }
+            check(findNext?.title == "Find Next", "menus: ⌘G is Find Next")
+            let findPrev = items(NSApp.mainMenu).first { $0.keyEquivalent == "g" && $0.keyEquivalentModifierMask == [.command, .shift] }
+            check(findPrev?.title == "Find Previous", "menus: ⇧⌘G is Find Previous")
             // A hidden run never puts Longhand in the owner's menu bar.
             let barItems = NSApp.windows.filter { String(describing: type(of: $0)).contains("StatusBar") && $0.frame.height > 0 }
             check(Updates.version(of: "v0.9.5-beta") == "0.9.5" && Updates.version(of: "v0.9.7a-beta") == "0.9.7a"

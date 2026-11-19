@@ -224,6 +224,10 @@ struct QuickOpen: View {
         list += [
             command("Switch Scene…", "⌘L") { store.switcherShown = true },
             command("Switch Document…", "⇧⌘L") { store.documentSwitcherShown = true },
+            command("Find…", "⌘F", greets: writing) { Commands.showFind(in: store.margin) },
+            command("Find Next", "⌘G") { Commands.findNext(in: store.margin) },
+            command("Find Previous", "⇧⌘G") { Commands.findPrevious(in: store.margin) },
+            command("Find and Replace…", "⌥⌘F") { Commands.showReplace(in: store.margin) },
             command("Find in Library…", "⇧⌘F", greets: store.openBook == nil) { store.searchShown = true },
             command("Comment on Selection", "⌘J", greets: writing) { Commands.comment(margin: store.margin) },
             command("Go to Contents", "⌥⌘1") { Panes.focus(.contents, in: store) },

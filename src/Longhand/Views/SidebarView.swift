@@ -20,6 +20,8 @@ struct SidebarView: View {
     @State private var looks: [URL: Look] = [:]
     /// Scenes' and chapters' statuses (Draft, Revised, Done), copied so rows don't observe the margin.
     @State private var statuses: [URL: SceneInfo.Status] = [:]
+    /// Scenes' colour labels (the cards' own), shown as a dot before the row.
+    @State private var labels: [URL: CardLabel] = [:]
     /// The book the contents is inside; empty for the Library (every book). Not a setting:
     /// it follows what is open (a scene or chapter opens its book).
     /// The card chosen on the cards (the margin's scene), copied so rows don't observe the
@@ -231,6 +233,9 @@ struct SidebarView: View {
             var marked: [URL: SceneInfo.Status] = [:]
             for (url, info) in infos { if let status = info.status { marked[url] = status } }
             if marked != statuses { statuses = marked }
+            var coloured: [URL: CardLabel] = [:]
+            for (url, info) in infos { if let label = info.label { coloured[url] = label } }
+            if coloured != labels { labels = coloured }
         }
         .sheet(item: $renameFolder) { folder in
             RenameSheet(title: folder.title) { store.renameFolder(folder.url, to: $0) }
@@ -288,6 +293,7 @@ struct SidebarView: View {
         change: ChangeState.Kind? = nil,
         words: Int? = nil,
         status: SceneInfo.Status? = nil,
+        label: CardLabel? = nil,
         selected: Bool,
         tag: Selection,
         disclosure: (collapsed: Bool, toggle: () -> Void)?,
@@ -306,6 +312,7 @@ struct SidebarView: View {
                 change: change,
                 words: words,
                 status: status,
+                label: label,
                 selected: selected,
                 keyed: selected && hasKeys,
                 collapsed: disclosure?.collapsed,
@@ -982,6 +989,7 @@ struct SidebarView: View {
             change: scene.flatMap { changeMarks[$0.url] },
             words: store.wordCount(of: chapter),
             status: statuses[scene?.url ?? chapter.url],
+            label: scene.flatMap { labels[$0.url] },
             selected: store.selection == tag || scene.map { onCards($0.url) } == true,
             tag: tag,
             disclosure: nil
@@ -1015,6 +1023,7 @@ struct SidebarView: View {
             change: changeMarks[scene.url],
             words: store.wordCount(of: scene),
             status: statuses[scene.url],
+            label: labels[scene.url],
             selected: store.selection == .scene(scene.url) || onCards(scene.url),
             tag: .scene(scene.url),
             disclosure: nil
@@ -1398,6 +1407,8 @@ private struct OutlineRow: View, Equatable {
     /// A scene's words, for its tooltip.
     let words: Int?
     let status: SceneInfo.Status?
+    /// A scene's card colour: a dot in the space before its number.
+    var label: CardLabel?
     let selected: Bool
     /// The chosen row while the contents has the keyboard: framed.
     var keyed = false
@@ -1410,7 +1421,7 @@ private struct OutlineRow: View, Equatable {
     static func == (a: OutlineRow, b: OutlineRow) -> Bool {
         a.leading == b.leading && a.number == b.number && a.numberWidth == b.numberWidth && a.title == b.title && a.weight == b.weight
             && a.count == b.count && a.comments == b.comments && a.change == b.change && a.selected == b.selected && a.keyed == b.keyed
-            && a.words == b.words && a.collapsed == b.collapsed && a.status == b.status
+            && a.words == b.words && a.collapsed == b.collapsed && a.status == b.status && a.label == b.label
     }
 
     /// A scene's words, and whether it changed since its last version. Made only when the
@@ -1483,6 +1494,15 @@ private struct OutlineRow: View, Equatable {
                     .fill(Color(change == .added ? PaperTheme.diffAddedMark : PaperTheme.diffChangedMark))
                     .frame(width: 3, height: Layout.rowHeight - 8)
                     .padding(.leading, 3)
+            }
+        }
+        .overlay(alignment: .leading) {
+            if let label {
+                Circle()
+                    .fill(Color(label.color))
+                    .frame(width: 7, height: 7)
+                    .padding(.leading, max(0, leading - 12))
+                    .help("Label: \(label.title)")
             }
         }
     }

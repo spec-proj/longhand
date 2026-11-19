@@ -97,6 +97,9 @@ its row is selected and its page shown, never its text left open beside the list
   sets it.
 - **No section headers.** Chapters are medium with a hairline (8pt clear above and below) between one chapter and the next; numbers right-aligned in tertiary, the title's weight, 7pt before it. Books are semibold; chapters carry their number in a
   tabular column; scenes are indented under the chapter's title. 13pt rows, 24pt tall.
+- **A scene's colour label** (owner, 2026-11-19, issue #26): the card's own colour, a 7pt dot
+  in the room before the scene's number (the contents' tree leaves it free), tooltip "Label:
+  Blue". It is the one round mark in the app and not a button; none when no label is set.
 - **Drag to reorder** (owner, 2026-11-12: the cards could, the contents couldn't): drag a
   scene onto another scene to put it before it, in any chapter; onto a chapter to make it
   that chapter's first scene; a chapter onto another chapter to put it before it. A 2px ink
@@ -223,10 +226,9 @@ The form:
   one; it is cropped to 1:1.6 and saved at most 1600 × 2560 as `.longhand/covers/<Book>.jpg`
   (moves with the book). Without one, a dashed box with "Add Cover".
 - Beside it: the title (New York, 30pt semibold); chips for words, pages (250 a page) and
-  reading time (250 a minute); **Stage** (13pt badges) (Idea grey, Sketch blue,
-  Writing yellow, Finished green: badges, the chosen one filled, click again to clear; renamed
-  from Draft and Manuscript on 2026-11-09 so neither clashes with Mark as Draft or the
-  manuscript as against a rewrite);
+  reading time (250 a minute); **Stage** (13pt badges) (Sketch blue, Writing yellow,
+  Draft orange, Final green: badges, the chosen one filled, click again to clear; Idea was
+  dropped and Draft and Final added, 2026-11-19, issue #19);
   **Form**, a menu (Novel, Novella, Short Story, Essay, Notebook); **Genre**, a menu of BISAC's fiction headings
   (bisg.org/fiction) for a book, or the film industry's movie genres (TMDB's list) for a
   screenplay; **Target** with a percentage chip and a rule. No hints in any field.
@@ -248,7 +250,8 @@ The form:
   the settings, not in the library: it is how the writer likes to look at their work.
 - **Library or inside a book (owner, 2026-11-08):** the Book Info page belongs to the Library.
   There, a click on a book shows its Book Info page; a double-click, the row's › or Return goes
-  into it. Inside a book, its header (cover or icon, name, badge, no word counts) opens the
+  into it, or **Open**, beside Edit on its page (2026-11-19, issue #25; not shown inside a
+  story, where you already are). Inside a book, its header (cover or icon, name, badge, no word counts) opens the
   whole book as cards. Library rows are larger: a cover-sized place for the cover or icon,
   the title over up to two lines (13pt semibold), then the badge with "Genre / Form", then the words.
 - No hints in the Book Info fields, no word counts in its chapter list.

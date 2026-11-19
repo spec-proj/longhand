@@ -6,11 +6,12 @@ import SwiftUI
 enum BookLook {
     /// The stages' badge colours (`BookStage.colour`).
     enum Colour: String {
-        case yellow, green, blue, grey
+        case yellow, green, blue, grey, orange
 
         var color: NSColor {
             switch self {
             case .yellow: return pair(0xA27F14, 0xD9B54E)
+            case .orange: return pair(0xC0702A, 0xE89A5A)
             case .green: return pair(0x3F8A4A, 0x7CC487)
             case .blue: return pair(0x3D6FB0, 0x7FA6DD)
             case .grey: return pair(0x75736C, 0xA09E96)

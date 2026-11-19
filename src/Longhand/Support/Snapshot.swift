@@ -309,7 +309,7 @@ enum Snapshot {
         }
         // LONGHAND_LOOKS=1: stages and Book Info details on the demo’s books.
         if environment["LONGHAND_LOOKS"] == "1", let books = store.library?.books {
-            let stages: [BookStage] = [.writing, .idea, .finished]
+            let stages: [BookStage] = [.writing, .sketch, .final]
             for (book, stage) in zip(books, stages) {
                 var info = store.margin.info(for: book.url)
                 info.stage = stage

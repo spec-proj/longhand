@@ -54,7 +54,7 @@ struct SceneInfo: Codable, Equatable {
     /// A word target, if the scene has one.
     var target: Int?
     // A book's details (the Book Info page). Scenes leave them empty.
-    /// Where the book stands: Idea, Sketch, Writing, Finished (a badge in the contents too).
+    /// Where the book stands: Sketch, Writing, Draft, Final (a badge in the contents too).
     var stage: BookStage?
     var form: BookForm?
     var genre: String?
@@ -162,28 +162,40 @@ enum StoryFact: String, Codable, CaseIterable, Identifiable {
     }
 }
 
-/// Where a book stands, set by the writer: a colour-coded badge. Named so as not to clash
-/// with Mark as Draft or the manuscript (as against a rewrite); saved under the older names
-/// ("draft", "manuscript") so books keep their stage.
+/// Where a book stands, set by the writer: a colour-coded badge, in order Sketch, Writing,
+/// Draft, Final (owner, issue #19; Idea was dropped). Saved under older names so books keep
+/// their stage: Writing is "draft" and Final is "manuscript" (what they were called before),
+/// so the new Draft stage is "drafted". A story saved as "idea" reads as Sketch, the first step.
 enum BookStage: String, Codable, CaseIterable, Identifiable {
-    case idea, sketch
+    case sketch
     case writing = "draft"
-    case finished = "manuscript"
+    case draft = "drafted"
+    case final = "manuscript"
     var id: String { rawValue }
     var title: String {
         switch self {
-        case .idea: return "Idea"
         case .sketch: return "Sketch"
         case .writing: return "Writing"
-        case .finished: return "Finished"
+        case .draft: return "Draft"
+        case .final: return "Final"
         }
     }
     var colour: BookLook.Colour {
         switch self {
-        case .idea: return .grey
         case .sketch: return .blue
         case .writing: return .yellow
-        case .finished: return .green
+        case .draft: return .orange
+        case .final: return .green
+        }
+    }
+
+    init?(rawValue: String) {
+        switch rawValue {
+        case "sketch", "idea": self = .sketch
+        case "draft": self = .writing
+        case "drafted": self = .draft
+        case "manuscript", "final": self = .final
+        default: return nil
         }
     }
 }
@@ -1054,10 +1066,10 @@ final class MarginStore: ObservableObject {
     static let coverRatio = 1.6
 
     /// Sets a book's cover from an image file: the picture is kept whole (as a JPEG, at most
-    /// 4000 pixels on its longer side), and the cover is its middle in the Kindle shape
-    /// (1:1.6) until `cropCover` chooses another part.
+    /// 4000 pixels on its longer side), and the cover is cropped to `unit` (or its middle
+    /// in the Kindle shape 1:1.6 when nil).
     @discardableResult
-    func setCover(of book: URL, from file: URL) -> Bool {
+    func setCover(of book: URL, from file: URL, cropTo unit: CGRect? = nil) -> Bool {
         guard let source = NSImage(contentsOf: file), let original = coverOriginalURL(for: book),
               let cg = source.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return false }
         let longest = max(cg.width, cg.height)
@@ -1066,7 +1078,7 @@ final class MarginStore: ObservableObject {
                                     width: Int(Double(cg.width) * scale), height: Int(Double(cg.height) * scale)) else { return false }
         try? FileManager.default.createDirectory(at: original.deletingLastPathComponent(), withIntermediateDirectories: true)
         guard (try? whole.write(to: original, options: .atomic)) != nil else { return false }
-        return cropCover(of: book, to: nil)
+        return cropCover(of: book, to: unit)
     }
 
     /// Makes the cover from part of its picture. `unit` is that part as fractions of the

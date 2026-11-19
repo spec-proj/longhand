@@ -155,6 +155,20 @@ struct LonghandApp: App {
                     .keyboardShortcut(.downArrow, modifiers: [.option, .command])
             }
             CommandGroup(after: .textEditing) {
+                Menu("Find") {
+                    Button("Find…") { Commands.showFind(in: store.margin) }
+                        .keyboardShortcut("f", modifiers: .command)
+                    Button("Find and Replace…") { Commands.showReplace(in: store.margin) }
+                        .keyboardShortcut("f", modifiers: [.option, .command])
+                    Button("Find Next") { Commands.findNext(in: store.margin) }
+                        .keyboardShortcut("g", modifiers: .command)
+                    Button("Find Previous") { Commands.findPrevious(in: store.margin) }
+                        .keyboardShortcut("g", modifiers: [.command, .shift])
+                    Divider()
+                    Button("Find in Library…") { store.searchShown = true }
+                        .keyboardShortcut("f", modifiers: [.command, .shift])
+                }
+                .disabled(store.library == nil)
                 Button("Command Palette…") { store.togglePalette() }
                     .keyboardShortcut("k", modifiers: .command)
                     .disabled(store.library == nil)

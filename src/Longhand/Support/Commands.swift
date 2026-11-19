@@ -5,14 +5,43 @@ import AppKit
 enum Commands {
     /// Opens the find bar on the page being edited.
     static func showFind(in margin: MarginStore) {
+        performFind(action: .showFindInterface, in: margin)
+    }
+
+    /// Opens the find bar with the replace interface.
+    static func showReplace(in margin: MarginStore) {
+        performFind(action: .showReplaceInterface, in: margin)
+    }
+
+    /// Finds the next occurrence.
+    static func findNext(in margin: MarginStore) {
+        performFind(action: .nextMatch, in: margin)
+    }
+
+    /// Finds the previous occurrence.
+    static func findPrevious(in margin: MarginStore) {
+        performFind(action: .previousMatch, in: margin)
+    }
+
+    private static func performFind(action: NSTextFinder.Action, in margin: MarginStore) {
         let window = NSApp.keyWindow ?? NSApp.mainWindow
-        if !(window?.firstResponder is NSTextView),
-           let page = margin.textView ?? window?.contentView.flatMap(pageTextView(in:)) {
-            window?.makeFirstResponder(page)
+        let page = (window?.firstResponder as? NSTextView).flatMap { $0.isFieldEditor ? nil : $0 }
+            ?? margin.textView
+            ?? window?.contentView.flatMap(pageTextView(in:))
+        guard let page else {
+            let item = NSMenuItem()
+            item.tag = action.rawValue
+            NSApp.sendAction(#selector(NSResponder.performTextFinderAction(_:)), to: nil, from: item)
+            return
+        }
+        if action == .showFindInterface || action == .showReplaceInterface {
+            if window?.firstResponder !== page && (window?.firstResponder as? NSTextView)?.isFieldEditor != true {
+                window?.makeFirstResponder(page)
+            }
         }
         let item = NSMenuItem()
-        item.tag = NSTextFinder.Action.showFindInterface.rawValue
-        NSApp.sendAction(#selector(NSResponder.performTextFinderAction(_:)), to: nil, from: item)
+        item.tag = action.rawValue
+        page.performTextFinderAction(item)
     }
 
     /// Comments on the selected text, opening the margin on Comments if it is hidden.
@@ -44,7 +73,7 @@ enum Commands {
     }
 
     private static func pageTextView(in view: NSView) -> NSTextView? {
-        if let textView = view as? NSTextView, textView.isEditable, textView.isFieldEditor == false {
+        if let textView = view as? NSTextView, textView.isSelectable, textView.isFieldEditor == false {
             return textView
         }
         for subview in view.subviews {

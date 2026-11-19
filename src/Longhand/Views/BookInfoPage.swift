@@ -20,7 +20,12 @@ struct BookInfoPage: View {
     @State private var isEditing = false
     @State private var dropping = false
     @State private var coverHover = false
-    @State private var croppingCover = false
+    private struct CoverDraft: Identifiable {
+        let id = UUID()
+        let url: URL?
+        let image: NSImage
+    }
+    @State private var coverDraft: CoverDraft?
     @FocusState private var editing: Field?
 
     enum Field: Hashable { case title, synopsis, genre, target }
@@ -85,6 +90,15 @@ struct BookInfoPage: View {
         .help(isEditing ? "Back to the story's page" : "Change the story's details")
     }
 
+    /// Goes into the story, as a double-click on its row does. Only in the Library: inside a
+    /// story, you are already in it.
+    private var openButton: some View {
+        Button("Open") { store.openBook = book.url }
+            .buttonStyle(FramedButtonStyle())
+            .fontWeight(.medium)
+            .help("Go into this story: its chapters and scenes")
+    }
+
     // MARK: Reading
 
     /// The page as it reads: the cover, the title and its author, the stage with the genre and
@@ -107,10 +121,16 @@ struct BookInfoPage: View {
                     .foregroundStyle(Color(PaperTheme.ink))
                     .fixedSize(horizontal: false, vertical: true)
                     .textSelection(.enabled)
-                    .padding(.trailing, 80)
+                    .padding(.trailing, store.openBook == nil ? 140 : 80)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.bottom, 2)
-                    .overlay(alignment: .topTrailing) { editButton.padding(.top, 6) }
+                    .overlay(alignment: .topTrailing) {
+                        HStack(spacing: 6) {
+                            if store.openBook == nil { openButton }
+                            editButton
+                        }
+                        .padding(.top, 6)
+                    }
                 if let byline {
                     Text(byline)
                         .font(.system(size: 20, design: .serif).italic())  // two-thirds of the title (owner: 15 was too small)
@@ -322,7 +342,11 @@ struct BookInfoPage: View {
         .contextMenu {
             Button("Choose Cover…", action: chooseCover)
             if margin.cover(of: book.url) != nil {
-                Button("Crop Cover…") { croppingCover = true }
+                Button("Crop Cover…") {
+                    if let picture = margin.coverSource(of: book.url) {
+                        coverDraft = CoverDraft(url: nil, image: picture)
+                    }
+                }
                 Button("Remove Cover", role: .destructive) { margin.removeCover(of: book.url) }
             }
         }
@@ -331,15 +355,31 @@ struct BookInfoPage: View {
             _ = provider.loadObject(ofClass: URL.self) { url, _ in
                 guard let url else { return }
                 Task { @MainActor in
-                    if margin.setCover(of: book.url, from: url) { croppingCover = true }
+                    if let image = NSImage(contentsOf: url) {
+                        coverDraft = CoverDraft(url: url, image: image)
+                    }
                 }
             }
             return true
         }
-        .sheet(isPresented: $croppingCover) {
-            if let picture = margin.coverSource(of: book.url) {
-                CoverCropSheet(picture: picture) { unit in margin.cropCover(of: book.url, to: unit) }
-            }
+        .sheet(item: $coverDraft) { draft in
+            CoverCropSheet(
+                picture: draft.image,
+                onChangeImage: {
+                    chooseCover()
+                },
+                onCancel: {
+                    coverDraft = nil
+                },
+                use: { unit in
+                    if let newURL = draft.url {
+                        margin.setCover(of: book.url, from: newURL, cropTo: unit)
+                    } else {
+                        margin.cropCover(of: book.url, to: unit)
+                    }
+                    coverDraft = nil
+                }
+            )
         }
     }
 
@@ -348,8 +388,9 @@ struct BookInfoPage: View {
         panel.allowedContentTypes = [.image]
         panel.allowsMultipleSelection = false
         panel.prompt = "Use as Cover"
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        if margin.setCover(of: book.url, from: url) { croppingCover = true }
+        guard panel.runModal() == .OK, let url = panel.url,
+              let image = NSImage(contentsOf: url) else { return }
+        coverDraft = CoverDraft(url: url, image: image)
     }
 
     // MARK: Chapters
@@ -496,7 +537,7 @@ struct BookInfoPage: View {
     }
 }
 
-/// Idea, Sketch, Writing, Finished: badges in their colours; the chosen one filled. Click it
+/// Sketch, Writing, Draft, Final: badges in their colours; the chosen one filled. Click it
 /// again to clear it.
 struct StagePicker: View {
     let stage: BookStage?
@@ -560,6 +601,8 @@ struct TintBadge: View {
 /// done again.
 struct CoverCropSheet: View {
     let picture: NSImage
+    var onChangeImage: (() -> Void)? = nil
+    var onCancel: (() -> Void)? = nil
     let use: (CGRect) -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var zoom: CGFloat = 1
@@ -598,9 +641,20 @@ struct CoverCropSheet: View {
             .frame(width: window.width)
 
             HStack(spacing: 8) {
-                Button("Cancel") { dismiss() }
-                    .keyboardShortcut(.cancelAction)
+                Button("Cancel") {
+                    onCancel?()
+                    dismiss()
+                }
+                .keyboardShortcut(.cancelAction)
+                .buttonStyle(SquareButtonStyle())
+
+                if let onChangeImage {
+                    Button("Change Image…") {
+                        onChangeImage()
+                    }
                     .buttonStyle(SquareButtonStyle())
+                }
+
                 Button("Use Cover") {
                     use(Self.unit(window: window, shown: shown, offset: clamped(offset)))
                     dismiss()
