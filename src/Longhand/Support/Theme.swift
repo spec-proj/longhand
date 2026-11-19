@@ -312,7 +312,6 @@ enum Symbol: String {
     case syncing = "arrow.triangle.2.circlepath"
     case mac = "laptopcomputer"
     case server = "server.rack"
-    case menuBar = "pencil.and.scribble"
     case cardsSmall = "square.grid.3x3"
     case cardsMedium = "square.grid.2x2"
     case cardsLarge = "square"

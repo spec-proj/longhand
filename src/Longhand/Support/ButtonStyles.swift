@@ -357,3 +357,36 @@ struct KeyFramedButtonStyle: PrimitiveButtonStyle {
             .keyControl(action: configuration.trigger)
     }
 }
+
+/// What hangs under the pointer while a card, row, chapter heading or story is dragged
+/// (owner, 2026-11-19: the ghost of the whole item was unattractive and felt like lag): a small
+/// card with its number and name, framed in ink like a chosen card, square-cornered like the
+/// rest of the app. Small, so it is quick to make and never hides where it is going.
+struct DragChip: View {
+    let number: String?
+    let title: String
+
+    var body: some View {
+        HStack(spacing: 8) {
+            if let number {
+                Text(number)
+                    .font(.system(size: Layout.smallSize, weight: .medium).monospacedDigit())
+                    .foregroundStyle(Color(PaperTheme.secondary))
+            }
+            Text(title)
+                .font(.system(size: Layout.listSize, weight: .semibold))
+                .foregroundStyle(Color(PaperTheme.ink))
+                .lineLimit(1)
+                .truncationMode(.tail)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 7)
+        .frame(maxWidth: 220, alignment: .leading)
+        .fixedSize(horizontal: true, vertical: true)
+        .background(Color(PaperTheme.card))
+        .roundedFrame(Color(PaperTheme.ink), lineWidth: 1)
+        // Room round it, so the shadow isn't cut off at the picture's edge.
+        .shadow(color: Color.black.opacity(0.22), radius: 5, x: 0, y: 2)
+        .padding(10)
+    }
+}

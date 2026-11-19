@@ -420,6 +420,23 @@ final class MarginStore: ObservableObject {
         openCounts = counts.filter { $0.value > 0 }
     }
 
+    /// After items were only renamed or moved on disk (their details and comments went with them,
+    /// see `relocate`): what the margin holds of them goes to their new places, instead of being
+    /// read from disk again for every scene.
+    func carryCounts(by moves: [(from: URL, to: URL)]) {
+        var details: [URL: SceneInfo] = [:]
+        for (url, info) in infos { details[LibraryStore.moved(url, by: moves)] = info }
+        infos = details
+        coverCache = [:]
+        coverVersion += 1
+        var counts: [URL: Int] = [:]
+        for (url, open) in openCounts { counts[LibraryStore.moved(url, by: moves)] = open }
+        for scene in pageScenes {
+            counts[scene] = comments.filter { $0.scene == scene && !$0.resolved }.count
+        }
+        openCounts = counts.filter { $0.value > 0 }
+    }
+
     /// Points the margin at a new place in the manuscript.
     func show(scene: URL?, chapter: URL?, book: URL?) {
         guard scene != sceneURL || chapter != chapterURL || book != bookURL else { return }

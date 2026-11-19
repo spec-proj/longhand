@@ -1,6 +1,18 @@
 import AppKit
 import SwiftUI
 
+/// When the last drag began (an `onDrag` closure ran), for the live script's `path` step to say
+/// how long picking an item up took. Costs one timestamp.
+@MainActor
+enum DragProbe {
+    static var began = 0.0
+    /// When a drop's handler ran (`dropped`), for the live script to say how long after the button
+    /// went up.
+    static var dropped = 0.0
+    static func mark() { began = ProcessInfo.processInfo.systemUptime }
+    static func markDrop() { dropped = ProcessInfo.processInfo.systemUptime }
+}
+
 /// Dev aids for checking the interface without screen-recording permission.
 ///
 ///     Longhand --snapshot /tmp/shot.png          render the window, then quit
@@ -43,8 +55,6 @@ enum Snapshot {
         let environment = ProcessInfo.processInfo.environment
         return environment["LONGHAND_CARDEDIT"] == "1" ? "edit" : environment["LONGHAND_CARDPICK"] == "1" ? "pick" : nil
     }()
-
-    static var wantsBook: Bool { bookNumber != nil }
 
     /// `LONGHAND_BOOK=n` selects the library's nth story (1, the first).
     static var bookNumber: Int? {
@@ -442,7 +452,9 @@ enum Snapshot {
     /// this app, one step per line:
     /// `scene N` · `chapter N` · `click X Y` / `double X Y` (window points from its top left;
     /// `wclick X Y` sends the click straight to the window, for a locked screen) ·
-    /// `type TEXT` · `key CODE [cmd opt ctrl shift]` · `wait S` · `scroll X Y DY` · `shot NAME` · `state LABEL`.
+    /// `type TEXT` · `key CODE [cmd opt ctrl shift]` · `wait S` · `scroll X Y DY` · `shot NAME` · `state LABEL` ·
+    /// `path X Y X Y …` (a drag along points, a move every 16ms, for `sample` to watch); `pathshot NAME …`
+    /// also photographs the screen round the pointer before letting go (the drag's own picture).
     /// Photos and `state.txt` go to the `LONGHAND_LIVE` folder; the run quits at the end.
     @MainActor
     static func runLiveScript(_ store: LibraryStore, dir: String, script: String) {
@@ -493,6 +505,28 @@ enum Snapshot {
                 }
             }
         }
+        // A white square in the window's corner while the button is down, so a film of the run shows
+        // exactly when it went down and up (`path`).
+        var marked: NSWindow?
+        func marker(_ on: Bool) {
+            // Off unless asked (LONGHAND_MARKER=1): an extra window changes how a drag ends.
+            guard environment["LONGHAND_MARKER"] == "1" else { return }
+            if on, let main = window() {
+                let square = NSWindow(contentRect: NSRect(x: main.frame.minX + 8, y: main.frame.minY + 8, width: 36, height: 36),
+                                      styleMask: [.borderless], backing: .buffered, defer: false)
+                square.backgroundColor = .white
+                square.isOpaque = true
+                square.ignoresMouseEvents = true
+                square.level = .floating
+                main.addChildWindow(square, ordered: .above)
+                square.orderFront(nil)
+                marked = square
+            } else if let square = marked {
+                square.parent?.removeChildWindow(square)
+                square.orderOut(nil)
+                marked = nil
+            }
+        }
         func state(_ label: String) {
             let margin = store.margin
             let page = margin.textView
@@ -539,6 +573,62 @@ enum Snapshot {
                     steps.append((0.04, { mouse(.leftMouseDragged, x, y) }))
                 }
                 steps.append((0.5, { mouse(.leftMouseUp, numbers[2], numbers[3]) }))
+            case "path", "pathshot":
+                // `path X Y X Y …`: one drag along those points (window points), the button down
+                // at the first and up at the last, a move every 16ms (a hand on a trackpad), for
+                // `sample` to watch. How late the moves run is no measure of lag: timers wait
+                // while a drag session is tracking.
+                guard numbers.count >= 4 else { break }
+                // `pathshot NAME X Y …`: the same, with a picture of the screen round the pointer
+                // (the drag's own picture is not in the window) before the button goes up.
+                let shotName = command == "pathshot" ? rest.split(separator: " ").first.map(String.init) : nil
+                let points = stride(from: 0, to: numbers.count - 1, by: 2).map { (numbers[$0], numbers[$0 + 1]) }
+                var path: [(Double, Double)] = [points[0]]
+                for (from, to) in zip(points, points.dropFirst()) {
+                    let count = max(1, Int(((to.0 - from.0) * (to.0 - from.0) + (to.1 - from.1) * (to.1 - from.1)).squareRoot() / 6))
+                    for step in 1...count {
+                        let t = Double(step) / Double(count)
+                        path.append((from.0 + (to.0 - from.0) * t, from.1 + (to.1 - from.1) * t))
+                    }
+                }
+                let route = path
+                var pressed = 0.0
+                var released = 0.0
+                steps.append((0.3, {
+                    DragProbe.began = 0
+                    DragProbe.dropped = 0
+                    pressed = ProcessInfo.processInfo.systemUptime
+                    marker(true)
+                    mouse(.leftMouseDown, route[0].0, route[0].1)
+                }))
+                for point in route.dropFirst() {
+                    steps.append((0.016, { mouse(.leftMouseDragged, point.0, point.1) }))
+                }
+                steps.append((0.25, {
+                    if let shotName {
+                        shots += 1
+                        let at = screenPoint(route[route.count - 1].0, route[route.count - 1].1)
+                        let process = Process()
+                        process.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+                        process.arguments = ["-x", "-R", "\(Int(at.x) - 260),\(Int(at.y) - 110),520,220",
+                                             "\(dir)/\(String(format: "%02d", shots))-\(shotName).png"]
+                        try? process.run()
+                        process.waitUntilExit()
+                    }
+                    log.append(DragProbe.began > 0
+                               ? String(format: "path: drag began %.0f ms after the button went down", (DragProbe.began - pressed) * 1000)
+                               : "path: no drag began")
+                }))
+                steps.append((0.3, {
+                    released = ProcessInfo.processInfo.systemUptime
+                    marker(false)
+                    mouse(.leftMouseUp, route[route.count - 1].0, route[route.count - 1].1)
+                }))
+                steps.append((0.6, {
+                    log.append(DragProbe.dropped > 0
+                               ? String(format: "release: the drop's handler ran %.0f ms after the button went up", (DragProbe.dropped - released) * 1000)
+                               : "release: the drop's handler never ran")
+                }))
             case "wclick":
                 // Straight into the window (works while the screen is locked or asleep).
                 steps.append((0.35, {
@@ -723,6 +813,20 @@ enum Snapshot {
                 if let name = environment["LONGHAND_NEWDOC_AUTHOR"] { AuthorProfiles.shared.add(AuthorProfile(name: name)) }
                 let form = environment["LONGHAND_NEWDOC_FORM"].flatMap(BookForm.init(rawValue:)) ?? .novel
                 content = AnyView(NewDocumentSheet(form: form).environmentObject(store))
+            case "ghosts":
+                // What hangs under the pointer in a drag: the card's old ghost, then the chips.
+                let info = SceneInfo(synopsis: "She walks the sands at low tide.", status: .revised)
+                content = AnyView(VStack(alignment: .leading, spacing: 18) {
+                    SceneCard(title: "Scene 2", number: "1.2", info: info, words: 744, comments: 2, selected: true,
+                              size: .medium, compact: true).frame(width: CardSize.medium.columnWidth)
+                    HStack(alignment: .top, spacing: 0) {
+                        DragChip(number: "1.2", title: "Scene 2")
+                        DragChip(number: "2", title: "Chapter 2")
+                        DragChip(number: nil, title: "The Salt Road")
+                    }
+                    DragChip(number: "12.4", title: "A scene with a very long name that runs on and on")
+                }
+                .padding(20).background(Color(PaperTheme.paper)))
             case "getlibrary":
                 content = AnyView(GetLibrarySheet(preview: ["writing", "short-fiction", "the-salt-road", "notebooks"])
                     .environmentObject(store).environmentObject(store.versions))

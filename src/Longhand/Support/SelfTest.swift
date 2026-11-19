@@ -1098,7 +1098,7 @@ enum SelfTest {
                 Git.run(["push", "-q", "origin", "rewrite/from-other"], in: other)
                 Git.run(["switch", "-q", "main"], in: other)
                 let stray = git("commit-tree", "rewrite/from-other^{tree}", "-p", "rewrite/from-other", "-m", "Diverges from the other Mac")
-                git("branch", "-f", "rewrite/from-other", stray)
+                _ = git("branch", "-f", "rewrite/from-other", stray)
                 _ = await withCheckedContinuation { (go: CheckedContinuation<Bool, Never>) in versions.pushNow { go.resume(returning: $0) } }
                 await syncSettle()
                 let pushes = versions.sync.log.filter { $0.command.hasPrefix("git push --all") }.count
@@ -1107,7 +1107,7 @@ enum SelfTest {
                 if case .other(let message) = versions.sync.problem { reported = message.contains("rejected") }
                 check(reported && versions.sync.log.filter { $0.command.hasPrefix("git push --all") }.count == pushes,
                       "sync: a push that stays rejected is reported, not retried in a loop")
-                git("branch", "-f", "rewrite/from-other", "refs/remotes/origin/rewrite/from-other")
+                _ = git("branch", "-f", "rewrite/from-other", "refs/remotes/origin/rewrite/from-other")
                 _ = await withCheckedContinuation { (go: CheckedContinuation<Bool, Never>) in versions.pushNow { go.resume(returning: $0) } }
                 await syncSettle()
                 check(versions.sync.problem == nil, "sync: the report clears once a push goes through")

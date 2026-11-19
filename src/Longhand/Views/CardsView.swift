@@ -212,6 +212,13 @@ struct BookCardsView: View {
     static func hasCards(_ book: Book) -> Bool { book.shape != .document }
 }
 
+/// Where a card sits on the board. Cards keep their view while a drop renames the files
+/// under them, so they are named by place rather than by file.
+private struct Spot: Hashable {
+    let column: Int
+    let row: Int
+}
+
 private struct CardBoard: View {
     @EnvironmentObject private var store: LibraryStore
     @EnvironmentObject private var margin: MarginStore
@@ -362,8 +369,8 @@ private struct CardBoard: View {
                 header.padding(.bottom, 24)
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 16, alignment: .top), count: columns),
                           alignment: .leading, spacing: 16) {
-                    ForEach(items) { item in
-                        card(item, list: urls, axis: .horizontal, lines: lines, height: height)
+                    ForEach(Array(items.enumerated()), id: \.offset) { row, item in
+                        card(item, spot: Spot(column: 0, row: row), list: urls, axis: .horizontal, lines: lines, height: height)
                     }
                 }
                 newButton.padding(.top, 16)
@@ -428,8 +435,8 @@ private struct CardBoard: View {
             ScrollView([.horizontal, .vertical]) {
                 // Lazy: only the columns in view are built (a novel has dozens of chapters).
                 LazyHStack(alignment: .top, spacing: 16) {
-                    ForEach(Array(lists.enumerated()), id: \.element.chapter.id) { index, list in
-                        column(list.chapter, items: list.items, number: hidesNumbers ? nil : index + 1, chapters: chapterURLs)
+                    ForEach(Array(lists.enumerated()), id: \.offset) { index, list in
+                        column(list.chapter, items: list.items, column: index, number: hidesNumbers ? nil : index + 1, chapters: chapterURLs)
                     }
                     // The last column: a new chapter (owner, 2026-11-15).
                     newChapterColumn
@@ -455,7 +462,7 @@ private struct CardBoard: View {
         .frame(width: size.columnWidth)
     }
 
-    private func column(_ chapter: Chapter, items: [CardItem], number: Int?, chapters: [URL]) -> some View {
+    private func column(_ chapter: Chapter, items: [CardItem], column: Int, number: Int?, chapters: [URL]) -> some View {
         let urls = items.map(\.id)
         return VStack(alignment: .leading, spacing: 10) {
             ChapterColumnHeader(chapter: chapter, number: number, words: store.wordCount(of: chapter),
@@ -464,8 +471,8 @@ private struct CardBoard: View {
                                 onCut: { store.moveChapterToBoneyard(chapter.url) })
                 .padding(.bottom, 4)
 
-            ForEach(items) { item in
-                card(item, list: urls, axis: .vertical)
+            ForEach(Array(items.enumerated()), id: \.offset) { row, item in
+                card(item, spot: Spot(column: column, row: row), list: urls, axis: .vertical)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
@@ -497,7 +504,7 @@ private struct CardBoard: View {
 
     // MARK: A card
 
-    private func card(_ item: CardItem, list: [URL], axis: Axis, lines: Int = CardSize.synopsisLines,
+    private func card(_ item: CardItem, spot: Spot, list: [URL], axis: Axis, lines: Int = CardSize.synopsisLines,
                       height: CGFloat? = nil) -> some View {
         BoardCard(
             item: item,
@@ -526,9 +533,9 @@ private struct CardBoard: View {
             onCancel: { editing = nil; takeKeys() },
             onEnd: { if editing == item.id { finishEditing() } }
         )
-        .id(item.id)
+        .id(spot)
         .contextMenu { menu(item) }
-        .onAppear {
+        .onChange(of: item.id, initial: true) {
             if pendingEdit == item.id { pendingEdit = nil; edit(item) }
             if let picture = Snapshot.cardPicture, lists.flatMap(\.items).first?.id == item.id {
                 Snapshot.cardPicture = nil
@@ -667,7 +674,10 @@ private struct CardBoard: View {
                                         gridColumns: isGrid ? columns : nil),
               let item = all.first(where: { $0.id == next }) else { return true }
         select(item)
-        proxy.scrollTo(item.id)
+        if let column = lists.firstIndex(where: { $0.items.contains { $0.id == item.id } }),
+           let row = lists[column].items.firstIndex(where: { $0.id == item.id }) {
+            proxy.scrollTo(Spot(column: column, row: row))
+        }
         return true
     }
 
@@ -773,11 +783,16 @@ private struct ChapterColumnHeader: View {
         .onTapGesture(perform: onOpen)
         .help("Click to open \(chapter.title); drag to move it")
         .onDrag {
+            DragProbe.mark()
             let payload = CardDrag.payload(chapter: chapter.url)
             CardDrag.payload = payload
             return NSItemProvider(object: payload as NSString)
+        } preview: {
+            DragChip(number: number.map(String.init), title: chapter.title)
         }
         .dropDestination(for: String.self) { payloads, _ in
+            DragProbe.markDrop()
+            targeted = false
             guard let payload = payloads.first else { return false }
             return onDrop(payload)
         } isTargeted: { targeted = $0 }
@@ -838,15 +853,16 @@ private struct BoardCard: View {
             // whether a second click is coming).
             .onTapGesture { onClick(NSApp.currentEvent?.clickCount ?? 1) }
             .onDrag {
+                DragProbe.mark()
                 let payload = CardDrag.payload(scene: item.id)
                 CardDrag.payload = payload
                 return NSItemProvider(object: payload as NSString)
             } preview: {
-                SceneCard(title: item.title, number: item.number, info: info, words: words, comments: comments,
-                          selected: true, size: size, compact: true)
-                    .frame(width: size.columnWidth)
+                DragChip(number: item.number, title: item.title)
             }
             .dropDestination(for: String.self) { payloads, _ in
+                DragProbe.markDrop()
+                targeted = false
                 guard let payload = payloads.first else { return false }
                 return onDrop(payload)
             } isTargeted: { targeted = $0 }

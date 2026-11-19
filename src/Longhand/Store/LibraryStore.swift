@@ -415,11 +415,17 @@ final class LibraryStore: ObservableObject {
         case keep, firstScene, none
     }
 
-    private func reload(select: ReloadSelection) {
+    /// `moves`: files that were only renamed or moved, none written (a drop, Move Up). What is known
+    /// of them, word counts and the margin's details, is carried to their new places instead of
+    /// read from disk again: a drop used to read some 300 small files to learn nothing new.
+    private func reload(select: ReloadSelection, carrying moves: [(from: URL, to: URL)]? = nil) {
         CanonicalPaths.shared.forget()
         guard let root = libraryURL else { return }
         let previous = selection
-        let scanned = scanLibrary(at: root)
+        let known = moves.map { moves in
+            Dictionary(wordCounts.map { (Self.moved($0.key, by: moves), $0.value) }, uniquingKeysWith: { first, _ in first })
+        }
+        let scanned = scanLibrary(at: root, known: known)
         library = scanned.library
         keepEmptyFolders()
         // The story the contents was inside may be gone (trashed, or removed outside
@@ -430,11 +436,15 @@ final class LibraryStore: ObservableObject {
         reloadCount += 1
         versions.scheduleChanges()
         versions.filesChanged()
-        margin.refreshCounts(
-            scenes: scanned.library.books.flatMap { allChapters(of: $0) }.flatMap(\.scenes).map(\.url),
-            books: scanned.library.books.map(\.url) + scanned.library.books.flatMap(\.chapters).map(\.url)
-                + scanned.library.books.flatMap(\.boneyardChapters).map(\.url)
-        )
+        if let moves {
+            margin.carryCounts(by: moves)
+        } else {
+            margin.refreshCounts(
+                scenes: scanned.library.books.flatMap { allChapters(of: $0) }.flatMap(\.scenes).map(\.url),
+                books: scanned.library.books.map(\.url) + scanned.library.books.flatMap(\.chapters).map(\.url)
+                    + scanned.library.books.flatMap(\.boneyardChapters).map(\.url)
+            )
+        }
 
         switch select {
         case .firstScene:
@@ -494,8 +504,10 @@ final class LibraryStore: ObservableObject {
         return String(url.canonical.path.dropFirst(base.count))
     }
 
-    private func scanLibrary(at root: URL) -> ScanResult {
+    private func scanLibrary(at root: URL, known: [URL: Int]? = nil) -> ScanResult {
         let fm = FileManager.default
+        // A file's words: carried over when it was only moved, else read.
+        func count(of url: URL) -> Int { known?[url] ?? Self.wordCount(read(url)) }
         let bookURLs = (try? fm.contentsOfDirectory(
             at: root,
             includingPropertiesForKeys: [.isDirectoryKey],
@@ -536,8 +548,7 @@ final class LibraryStore: ObservableObject {
                 for rawSceneURL in sceneURLs where rawSceneURL.pathExtension.lowercased() == ProseFile.markdown {
                     let sceneURL = rawSceneURL.canonical
                     let sceneName = FileNaming.decode(sceneURL.deletingPathExtension().lastPathComponent)
-                    let content = read(sceneURL)
-                    counts[sceneURL] = Self.wordCount(content)
+                    counts[sceneURL] = count(of: sceneURL)
                     scenes.append(Scene(url: sceneURL, title: sceneName.title, order: sceneName.order))
                 }
 
@@ -566,7 +577,7 @@ final class LibraryStore: ObservableObject {
                 for rawSceneURL in usable {
                     let sceneURL = rawSceneURL.canonical
                     let sceneName = FileNaming.decode(sceneURL.deletingPathExtension().lastPathComponent)
-                    counts[sceneURL] = Self.wordCount(read(sceneURL))
+                    counts[sceneURL] = count(of: sceneURL)
                     scenes.append(Scene(url: sceneURL, title: sceneName.title, order: sceneName.order))
                 }
                 scenes.sort(by: ordered)
@@ -589,7 +600,7 @@ final class LibraryStore: ObservableObject {
                 for raw in inBoneyard where ProseFile.isProse(raw) && !isDirectory(raw) {
                     let url = raw.canonical
                     let name = FileNaming.decode(url.deletingPathExtension().lastPathComponent)
-                    counts[url] = Self.wordCount(read(url))
+                    counts[url] = count(of: url)
                     cut.append(Scene(url: url, title: name.title, order: name.order))
                 }
                 // A cut chapter: a folder of its own, with its scenes inside.
@@ -601,7 +612,7 @@ final class LibraryStore: ObservableObject {
                     where rawScene.pathExtension.lowercased() == ProseFile.markdown && !isDirectory(rawScene) {
                         let sceneURL = rawScene.canonical
                         let sceneName = FileNaming.decode(sceneURL.deletingPathExtension().lastPathComponent)
-                        counts[sceneURL] = Self.wordCount(read(sceneURL))
+                        counts[sceneURL] = count(of: sceneURL)
                         scenes.append(Scene(url: sceneURL, title: sceneName.title, order: sceneName.order))
                     }
                     scenes.sort(by: ordered)
@@ -1196,12 +1207,12 @@ final class LibraryStore: ObservableObject {
             moves.append((other.url, movedB))
             let movedA = try renameFile(parked, kind: item.kind, order: other.order, title: item.title)
             moves.append((item.url, movedA))
-            follow(moves)
+            follow(moves, carrying: true)
         } catch {
             if FileManager.default.fileExists(atPath: parked.path) {
                 try? FileManager.default.moveItem(at: parked, to: FileNaming.unique(item.url))
             }
-            follow(moves)
+            follow(moves, carrying: true)
             errorMessage = "Couldn’t move it."
         }
     }
@@ -1287,7 +1298,7 @@ final class LibraryStore: ObservableObject {
                 try fm.moveItem(at: item.temp, to: destination)
                 moves.append((item.scene.url, destination.canonical))
             }
-            follow(moves)
+            follow(moves, carrying: true)
         } catch {
             // Put anything still parked back under a visible name, so nothing is hidden.
             for item in parked where fm.fileExists(atPath: item.temp.path) {
@@ -1297,7 +1308,7 @@ final class LibraryStore: ObservableObject {
                     moves.append((item.scene.url, destination.canonical))
                 }
             }
-            follow(moves)
+            follow(moves, carrying: true)
             errorMessage = "Couldn’t move that scene."
         }
     }
@@ -1536,7 +1547,7 @@ final class LibraryStore: ObservableObject {
                 // Canonical now it is there: a folder's address is the one the library reads it by.
                 moves.append((item.url, destination.canonical))
             }
-            follow(moves)
+            follow(moves, carrying: true)
         } catch {
             // Put anything still parked back under a visible name, so nothing is hidden.
             for item in parked where fm.fileExists(atPath: item.temp.path) {
@@ -1546,7 +1557,7 @@ final class LibraryStore: ObservableObject {
                     moves.append((item.url, destination.canonical))
                 }
             }
-            follow(moves)
+            follow(moves, carrying: true)
             errorMessage = "Couldn’t number the chapters."
         }
     }
@@ -1872,20 +1883,17 @@ final class LibraryStore: ObservableObject {
 
     /// After items move on disk, re-read the library and keep the open scene and the
     /// selection pointing at the same things in their new places.
-    private func follow(_ moves: [(from: URL, to: URL)]) {
-        func relocate(_ url: URL) -> URL {
-            for move in moves {
-                if let moved = Self.relocated(url, from: move.from, to: move.to) { return moved }
-            }
-            return url
-        }
+    /// `carrying`: the files were only renamed or moved, never written, so what is known of them
+    /// goes with them (see `reload`).
+    private func follow(_ moves: [(from: URL, to: URL)], carrying: Bool = false) {
+        func relocate(_ url: URL) -> URL { Self.moved(url, by: moves) }
 
         if let active = activeSceneURL { activeSceneURL = relocate(active) }
         if let open = openBook { openBook = relocate(open) }
         margin.relocate(moves)
         places.relocate(moves)
         let previous = selection
-        reload(select: .none)
+        reload(select: .none, carrying: carrying ? moves : nil)
 
         guard let previous else { return }
         let target = relocate(previous.url)
@@ -1895,6 +1903,14 @@ final class LibraryStore: ObservableObject {
         case .chapter: selection = .chapter(target)
         case .scene: selection = .scene(target)
         }
+    }
+
+    /// Where `url` is after all of `moves` (itself if none touches it).
+    static func moved(_ url: URL, by moves: [(from: URL, to: URL)]) -> URL {
+        for move in moves {
+            if let moved = relocated(url, from: move.from, to: move.to) { return moved }
+        }
+        return url
     }
 
     /// Where `url` ends up when `old` is moved to `new`: itself if it is `old`, the same place

@@ -379,7 +379,7 @@ private struct ScopeComments: View {
             return open.isEmpty ? nil : (scene, open)
         }
         ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
+            LazyVStack(alignment: .leading, spacing: 20) {
                 ForEach(groups, id: \.0.id) { scene, comments in
                     VStack(alignment: .leading, spacing: 2) {
                         Text(scene.title)

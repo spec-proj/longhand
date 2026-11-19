@@ -41,8 +41,6 @@ struct SidebarView: View {
     }
 
     @State private var collapsedChapters: Set<URL> = []
-    /// Stories whose Boneyard is open in the contents (folded away until opened).
-    @State private var openBoneyards: Set<URL> = []
     /// A single document's headings (owner, 2026-11-14): its outline, in place of chapters.
     @State private var outline: [OutlineHeading] = []
     @State private var collapsedFolders: Set<URL> = []
@@ -120,7 +118,7 @@ struct SidebarView: View {
                                         sceneRow(scene, number: numbered ? "\(place + 1)" : nil, numberWidth: widest, flat: true)
                                     }
                                 }
-                                ForEach(Array(book.chapters.filter { !$0.implicit }.enumerated()), id: \.element.id) { index, chapter in
+                                ForEach(Array(book.chapters.filter { !$0.implicit }.enumerated()), id: \.offset) { index, chapter in
                                     if index > 0 {
                                         // A little space between chapters, no line (owner,
                                         // 2026-11-14). (The 8pt above is the end of the chapter
@@ -132,7 +130,7 @@ struct SidebarView: View {
                                         // Chapters only: the chapter is its one file.
                                         chapterOnlyRow(chapter, number: numbered ? index + 1 : nil)
                                     } else {
-                                        chapterRow(chapter, number: numbered ? index + 1 : nil)
+                                        chapterRow(chapter, number: numbered ? index + 1 : nil, spot: RowSpot(chapter: index))
                                     }
 
                                     if book.shape == .chaptersAndScenes && !collapsedChapters.contains(chapter.url) {
@@ -141,8 +139,9 @@ struct SidebarView: View {
                                         // The widest number in the chapter sets where its scenes'
                                         // titles start, so they share an edge.
                                         let widest = numbered ? Self.numberWidth("\(index + 1).\(chapter.scenes.count)") : 0
-                                        ForEach(Array(chapter.scenes.enumerated()), id: \.element.id) { place, scene in
-                                            sceneRow(scene, number: numbered ? "\(index + 1).\(place + 1)" : nil, numberWidth: widest)
+                                        ForEach(Array(chapter.scenes.enumerated()), id: \.offset) { place, scene in
+                                            sceneRow(scene, number: numbered ? "\(index + 1).\(place + 1)" : nil, numberWidth: widest,
+                                                     spot: RowSpot(chapter: index, scene: place))
                                         }
                                     }
                                     endZone(of: chapter, last: index == book.chapters.count - 1)
@@ -179,7 +178,10 @@ struct SidebarView: View {
                     enterBook(of: selection)
                     // Only when it's off screen: asking the list to scroll walks every row
                     // (a quarter of the time it took to open a chapter).
-                    if let selection, !onScreen.rows.contains(selection) { reader.scrollTo(selection) }
+                    if let selection {
+                        let id = rowID(selection)
+                        if !onScreen.rows.contains(id) { reader.scrollTo(id) }
+                    }
                 }
                 .onAppear { enterBook(of: store.selection); refreshOutline() }
                 // Rows taken away don't always say they've left the screen.
@@ -296,10 +298,12 @@ struct SidebarView: View {
         label: CardLabel? = nil,
         selected: Bool,
         tag: Selection,
+        spot: RowSpot? = nil,
         disclosure: (collapsed: Bool, toggle: () -> Void)?,
         @ViewBuilder menu: @escaping () -> Menu
     ) -> some View {
-        RowShell(
+        let id: AnyHashable = spot.map { AnyHashable($0) } ?? AnyHashable(tag)
+        return RowShell(
             row: OutlineRow(
                 leading: leading,
                 number: number,
@@ -320,6 +324,7 @@ struct SidebarView: View {
                 triangle: triangle,
                 numberGap: numberGap
             ),
+            tag: tag,
             tap: { [store] in
                 takeKeys()
                 if store.selection != tag { store.selection = tag }
@@ -328,16 +333,20 @@ struct SidebarView: View {
         )
         .equatable()
         .onScrollVisibilityChange(threshold: 0.9) { [onScreen] visible in
-            if visible { onScreen.rows.insert(tag) } else { onScreen.rows.remove(tag) }
+            if visible { onScreen.rows.insert(id) } else { onScreen.rows.remove(id) }
         }
         // Drag a scene or chapter to where it should go. A 2px rule shows where it will
         // land: above the row it is over, or under a chapter's row for a scene dropped on
         // the chapter (it becomes the chapter's first scene).
         .onDrag {
+            DragProbe.mark()
             dragging = tag
             return NSItemProvider(object: Self.payload(tag) as NSString)
+        } preview: {
+            DragChip(number: number, title: title)
         }
         .dropDestination(for: String.self) { items, _ in
+            DragProbe.markDrop()
             defer { dragging = nil; dropTarget = nil }
             return drop(items, on: tag)
         } isTargeted: { over in
@@ -352,7 +361,7 @@ struct SidebarView: View {
                     .allowsHitTesting(false)
             }
         }
-        .id(tag)
+        .id(id)
     }
 
     /// The space under a chapter's last scene: drop a scene here to put it last in the
@@ -541,6 +550,25 @@ struct SidebarView: View {
         looks[book.url]?.hideNumbers == true
     }
 
+    /// What names a row to the list: its place in the open story for a chapter or scene (a
+    /// drop renames their files, but the rows stay and only change what they say), else the
+    /// selection itself.
+    private func rowID(_ selection: Selection) -> AnyHashable {
+        guard let library = store.library, let book = openBook(in: library), book.shape == .chaptersAndScenes else { return selection }
+        let chapters = book.chapters.filter { !$0.implicit }
+        switch selection {
+        case .chapter(let url):
+            if let index = chapters.firstIndex(where: { $0.url == url }) { return RowSpot(chapter: index) }
+        case .scene(let url):
+            for (index, chapter) in chapters.enumerated() {
+                if let place = chapter.scenes.firstIndex(where: { $0.url == url }) { return RowSpot(chapter: index, scene: place) }
+            }
+        case .book:
+            break
+        }
+        return selection
+    }
+
     private func openBook(in library: Library) -> Book? {
         guard let open = store.openBook else { return nil }
         return library.books.first { $0.url == open }
@@ -597,7 +625,6 @@ struct SidebarView: View {
     private func bookCard(_ book: Book) -> some View {
         let look = looks[book.url]
         let selected = store.selection == .book(book.url)
-        let words = store.wordCount(of: book)
         let target = store.margin.info(for: book.url).target
         return VStack(spacing: 0) {
             // Back to every story: a labelled row the width of the column, in line with the
@@ -747,8 +774,11 @@ struct SidebarView: View {
         // Drag a story onto another: in the same folder it takes that row's place, in
         // another folder it joins that one.
         .onDrag {
+            DragProbe.mark()
             storyDrag = book.url
             return NSItemProvider(object: Self.payload(.book(book.url)) as NSString)
+        } preview: {
+            DragChip(number: nil, title: book.title)
         }
         .dropDestination(for: String.self) { items, _ in
             dropStory(items, at: book.url)
@@ -868,7 +898,7 @@ struct SidebarView: View {
         store.selection = rows[next]
     }
 
-    private func chapterRow(_ chapter: Chapter, number: Int?) -> some View {
+    private func chapterRow(_ chapter: Chapter, number: Int?, spot: RowSpot) -> some View {
         row(
             leading: rowLeading,
             number: number.map(String.init),
@@ -880,6 +910,7 @@ struct SidebarView: View {
             status: statuses[chapter.url],
             selected: store.selection == .chapter(chapter.url),
             tag: .chapter(chapter.url),
+            spot: spot,
             disclosure: (collapsedChapters.contains(chapter.url), { toggle(&collapsedChapters, chapter.url) })
         ) {
             Button("New \(store.names(of: chapter.url.deletingLastPathComponent().canonical).scene)") {
@@ -996,6 +1027,7 @@ struct SidebarView: View {
         ) {
             Button("Rename…") { renameTarget = item(for: chapter) }
             statusMenu(scene?.url ?? chapter.url)
+            if let scene { labelMenu(scene.url) }
             Divider()
             Button("Move Up") { store.move(item(for: chapter), by: -1) }
             Button("Move Down") { store.move(item(for: chapter), by: 1) }
@@ -1007,7 +1039,7 @@ struct SidebarView: View {
 
     /// A tree (owner, 2026-11-13): a chapter's scenes sit one level in, starting where the
     /// chapter's title starts, their numbers left-aligned and their titles on one edge.
-    private func sceneRow(_ scene: Scene, number: String?, numberWidth: CGFloat, flat: Bool = false) -> some View {
+    private func sceneRow(_ scene: Scene, number: String?, numberWidth: CGFloat, flat: Bool = false, spot: RowSpot? = nil) -> some View {
         let chapterTitle = rowLeading + triangle + (number == nil ? 0 : numberColumn + numberGap)
         // A scenes-only story's scenes start where a chapter's title would.
         let leading = flat ? rowLeading + triangle : (number == nil ? chapterTitle + step : chapterTitle)
@@ -1026,10 +1058,12 @@ struct SidebarView: View {
             label: labels[scene.url],
             selected: store.selection == .scene(scene.url) || onCards(scene.url),
             tag: .scene(scene.url),
+            spot: spot,
             disclosure: nil
         ) {
             Button("Rename…") { renameTarget = item(for: scene) }
             statusMenu(scene.url)
+            labelMenu(scene.url)
             Divider()
             Button("Move Up") { store.move(item(for: scene), by: -1) }
             Button("Move Down") { store.move(item(for: scene), by: 1) }
@@ -1202,6 +1236,24 @@ struct SidebarView: View {
         }
     }
 
+    /// The scene's card colour, the one the dot in the contents shows.
+    private func labelMenu(_ url: URL) -> some View {
+        let current = labels[url]
+        return Menu("Label") {
+            ForEach(CardLabel.allCases) { label in
+                Toggle(label.title, isOn: Binding(get: { current == label }, set: { _ in setLabel(current == label ? nil : label, of: url) }))
+            }
+            Divider()
+            Button("None") { setLabel(nil, of: url) }
+        }
+    }
+
+    private func setLabel(_ label: CardLabel?, of url: URL) {
+        var info = store.margin.info(for: url)
+        info.label = label
+        store.margin.setInfo(info, for: url)
+    }
+
     private func setStatus(_ status: SceneInfo.Status?, of url: URL) {
         var info = store.margin.info(for: url)
         info.status = info.status == status ? nil : status
@@ -1369,18 +1421,27 @@ private struct DisclosureTriangle: View {
 /// tabular column, scenes are indented under the chapter title. The selected row is a flat
 /// band, edge to edge (drawn by the list row background).
 final class RowsOnScreen {
-    var rows: Set<Selection> = []
+    var rows: Set<AnyHashable> = []
+}
+
+/// Where a chapter row or a scene row sits in the open story.
+private struct RowSpot: Hashable {
+    let chapter: Int
+    var scene: Int?
 }
 
 /// A whole outline row: the row, its selection band, click and menu. Compared by the row's
-/// values alone, so on a selection change SwiftUI rebuilds two rows, not every row's
-/// modifiers. (The click and menu closures only capture the store and the row's own item.)
+/// values and the item it stands for, so on a selection change SwiftUI rebuilds two rows, not
+/// every row's modifiers. (The click and menu closures only capture the store and that item:
+/// a row can be reused for another item when a drop renames the files, so the item is compared
+/// too, or a row that looked the same would keep acting on the old one.)
 private struct RowShell<Menu: View>: View, Equatable {
     let row: OutlineRow
+    let tag: Selection
     let tap: () -> Void
     @ViewBuilder let menu: () -> Menu
 
-    static func == (a: RowShell, b: RowShell) -> Bool { a.row == b.row }
+    static func == (a: RowShell, b: RowShell) -> Bool { a.tag == b.tag && a.row == b.row }
 
     var body: some View {
         row

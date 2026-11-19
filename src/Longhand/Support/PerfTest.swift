@@ -1,4 +1,5 @@
 import AppKit
+import SwiftUI
 import QuartzCore
 
 /// Dev aid: `Longhand --perftest /path/report.txt`, with `LONGHAND_LIBRARY` pointing at a
@@ -74,7 +75,7 @@ enum PerfTest {
         let scenes = book.chapters.flatMap(\.scenes)
         lines.append("Library: \(scenes.count) scenes, \(store.totalWordCount) words")
 
-        // LONGHAND_PERF_ONLY=chapters|cards|switch|themes: repeat just that (n = LONGHAND_PERF_REPEAT,
+        // LONGHAND_PERF_ONLY=chapters|cards|drop|dropchapter|switch|themes: repeat just that (n = LONGHAND_PERF_REPEAT,
         // default 200), timed in phases, for profiling with `sample`.
         if ProcessInfo.processInfo.environment["LONGHAND_PERF_ONLY"] == "launch" {
             finishNow(lines, to: reportPath)
@@ -93,11 +94,37 @@ enum PerfTest {
         }
         if let only = ProcessInfo.processInfo.environment["LONGHAND_PERF_ONLY"] {
             let repeats = Int(ProcessInfo.processInfo.environment["LONGHAND_PERF_REPEAT"] ?? "") ?? 200
-            if only == "cards" {
+            // LONGHAND_PERF_ONLY=ghost: what it costs to draw what hangs under the pointer in a drag.
+            if only == "ghost" {
+                let info = SceneInfo(synopsis: "She walks the sands at low tide to the house her brother said would be empty.", status: .revised)
+                func time<V: View>(_ view: V) -> Double {
+                    let started = now()
+                    for _ in 0..<repeats {
+                        let renderer = ImageRenderer(content: view)
+                        renderer.scale = 2
+                        _ = renderer.nsImage
+                    }
+                    return (now() - started) / Double(repeats)
+                }
+                report("ghost: a whole card (before)", time(SceneCard(title: "Scene 2", number: "1.2", info: info, words: 744, comments: 2,
+                                                                  selected: true, size: .medium, compact: true).frame(width: CardSize.medium.columnWidth)))
+                report("ghost: the chip", time(DragChip(number: "1.2", title: "Scene 2")))
+                finish(lines, to: reportPath)
+                return
+            }
+            if only == "cards" || only == "drop" || only == "dropchapter" {
                 ViewModes.forcedStory = .cards
                 store.openBook = book.url
             }
-            // LONGHAND_PERF_BARE=1|sidebar|margin: without both side columns, or with only that one.
+            // LONGHAND_PERF_ONLY=drop: a scene dropped on another chapter's cards, again and again
+            // (to the top of chapter 2, then back to the top of chapter 1), with the cards showing.
+            var dropped = book.chapters.first?.scenes.first?.url
+            if only == "drop" || only == "dropchapter" {
+                store.selection = .book(book.url)
+                await settle(600)
+            }
+            // LONGHAND_PERF_BARE=1|sidebar|margin: 1 hides both side columns; margin keeps only the
+            // contents, sidebar keeps only the margin.
             if let bare = ProcessInfo.processInfo.environment["LONGHAND_PERF_BARE"] {
                 UserDefaults.standard.setVolatileDomain(
                     UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)
@@ -117,6 +144,18 @@ enum PerfTest {
                 switch only {
                 case "chapters": store.selection = .chapter(book.chapters[index % book.chapters.count].url)
                 case "cards": store.selection = index % 2 == 0 ? .book(book.url) : .scene(scenes[index % scenes.count].url)
+                case "drop":
+                    let target = book.chapters[index % 2 == 0 ? 1 : 0].url
+                    if let url = dropped {
+                        store.placeScene(url, inChapter: target, at: 0)
+                        dropped = store.chapter(for: target)?.scenes.first?.url
+                    }
+                // A chapter dropped two places on, then back (the story's board).
+                case "dropchapter":
+                    if let chapters = store.book(for: book.url)?.chapters, chapters.count > 2 {
+                        let moving = index % 2 == 0 ? chapters[0] : chapters[2]
+                        store.placeChapter(moving.url, at: index % 2 == 0 ? 2 : 0)
+                    }
                 // A theme previewed (the palette's list): the window drawn again in it.
                 case "themes": AppTheme.preview(AppTheme.allCases[index % AppTheme.allCases.count])
                 default: store.selection = .scene(scenes[index % scenes.count].url)

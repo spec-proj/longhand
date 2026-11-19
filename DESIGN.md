@@ -100,6 +100,8 @@ its row is selected and its page shown, never its text left open beside the list
 - **A scene's colour label** (owner, 2026-11-19, issue #26): the card's own colour, a 7pt dot
   in the room before the scene's number (the contents' tree leaves it free), tooltip "Label:
   Blue". It is the one round mark in the app and not a button; none when no label is set.
+  Right-click a scene (or a chapters-only story's chapter) › **Label ›** sets it, as on the
+  cards: the seven colours with a check on the current one, None clears it.
 - **Drag to reorder** (owner, 2026-11-12: the cards could, the contents couldn't): drag a
   scene onto another scene to put it before it, in any chapter; onto a chapter to make it
   that chapter's first scene; a chapter onto another chapter to put it before it. A 2px ink
@@ -210,6 +212,12 @@ card, dragging chapters, dragging to the Boneyard).
   lands just after it, so dropping on the next card moves one place on); a 2px ink rule shows
   the side, beside a card in a grid, above or below in a column. The empty end of a chapter
   puts it last. The contents' **Boneyard tab takes a dropped card** (or scene row) and cuts it.
+- **What hangs under the pointer** (owner, 2026-11-19: the ghost of the whole item was
+  unattractive and added to the feeling of lag): the same small **chip** for every drag, a card,
+  a contents row, a chapter heading, a story: its number (12pt, grey, tabular) and its name
+  (13pt semibold, cut at 220pt), in a card-coloured box with a 1px ink frame (like a chosen
+  card), 4pt corners, a soft shadow. Never a copy of the item, never a pill (`DragChip`).
+  Picture: `LONGHAND_SHEET=ghosts`.
 - Right-click a card: Open, Edit Card, Status ›, Label ›, Move To › (chapters), Move to
   Boneyard, Show in Finder, Move to Trash. Right-click a chapter's heading on the story's
   board: Move to Boneyard.

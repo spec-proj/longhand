@@ -429,7 +429,7 @@ private struct ThemeMenu: View {
         .buttonStyle(.plain)
         .focusable(false)
         .fixedSize()
-        .keyControl { ThemeMenuController.shared.show(from: anchor.view, current: theme, dark: dark) }
+        .keyControl(action: { ThemeMenuController.shared.show(from: anchor.view, current: theme, dark: dark) })
     }
 }
 
@@ -552,7 +552,7 @@ struct SquareCheckbox: View {
         }
         .buttonStyle(.plain)
         .focusable(false)
-        .keyControl(radius: Layout.smallRadius + 1) { isOn.toggle() }
+        .keyControl(radius: Layout.smallRadius + 1, action: { isOn.toggle() })
     }
 }
 

@@ -129,9 +129,7 @@ struct BoneyardStrip: View {
             HStack(spacing: 10) {
                 Group {
                     if let cut {
-                        Text("Cut from ") + Text(cut.from).foregroundColor(Color(PaperTheme.ink)).fontWeight(.medium)
-                            + Text(cut.number.map { " (scene \($0))" } ?? "")
-                            + Text(" on \(cut.date.formatted(.dateTime.day().month(.abbreviated)))")
+                        Text("Cut from \(Text(cut.from).foregroundColor(Color(PaperTheme.ink)).fontWeight(.medium))\(cut.number.map { " (scene \($0))" } ?? "") on \(cut.date.formatted(.dateTime.day().month(.abbreviated)))")
                     } else {
                         Text("In the Boneyard")
                     }
@@ -350,46 +348,6 @@ struct ChapterHeader: View {
         .frame(width: 24)
         .disabled(target == nil)
         .help(target.map { "\(help): \($0.title)" } ?? help)
-    }
-}
-
-/// The row across the top of the page: what the open page belongs to (a scene's chapter, a
-/// chapter's book), set in line with the prose. 32pt with a hairline, like the contents'
-/// header and the margin's tabs, so the three lines meet across the window. Click to go there.
-struct PageHeader: View {
-    let label: String?
-    let title: String
-    let help: String
-    let action: () -> Void
-    @State private var hovering = false
-
-    var body: some View {
-        VStack(spacing: 0) {
-            Column {
-                Button(action: action) {
-                    HStack(spacing: 8) {
-                        if let label {
-                            Text(label).foregroundStyle(Color(PaperTheme.secondary))
-                        }
-                        Text(title)
-                            .fontWeight(.medium)
-                            .foregroundStyle(Color(hovering ? PaperTheme.accent : PaperTheme.ink))
-                            .lineLimit(1)
-                            .truncationMode(.tail)
-                        Spacer(minLength: 0)
-                    }
-                    .font(.system(size: Layout.chromeSize))
-                    .padding(.horizontal, Layout.proseInset)
-                    .frame(maxHeight: .infinity)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .onHover { hovering = $0 }
-                .help(help)
-            }
-            .frame(height: Layout.headerHeight)
-            Rectangle().fill(Color(PaperTheme.hairline)).frame(height: 1)
-        }
     }
 }
 
