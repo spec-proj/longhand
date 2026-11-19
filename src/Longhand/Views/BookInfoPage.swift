@@ -236,7 +236,7 @@ struct BookInfoPage: View {
                              setCollection: { value in update { $0.collection = value } }) { form in update { $0.form = form } }
                 }
                 labelled("Genre") {
-                    GenreMenu(genre: info.genre) { value in update { $0.genre = value } }
+                    GenreMenu(genre: info.genre, form: info.form) { value in update { $0.genre = value } }
                 }
                 labelled("Show") {
                     HStack(spacing: 14) {
@@ -768,11 +768,13 @@ enum Estimate {
     }
 }
 
-/// The genre, from BISAC's fiction headings (Book Industry Study Group, the book trade's
-/// standard: bisg.org/fiction, 2025): its 70 headings plus the 18 that it uses only as
-/// parents of sub-headings (Fantasy, Romance, Thrillers …).
+/// The genres offered in the Genre menu. Movies and books use different lists: a screenplay
+/// gets the film industry's genres, everything else the book trade's.
 enum Genres {
-    static let all: [String] = [
+    /// BISAC's fiction headings (Book Industry Study Group, the book trade's standard:
+    /// bisg.org/fiction, 2025): its 70 headings plus the 18 that it uses only as parents of
+    /// sub-headings (Fantasy, Romance, Thrillers …).
+    static let book: [String] = [
         "Absurdist", "Action & Adventure", "Adaptations & Pastiche", "African American & Black",
         "Alternative History", "Amish & Mennonite", "Animals", "Anthologies (multiple authors)",
         "Asian American & Pacific Islander", "Biographical & Autofiction", "Books, Bookstores & Libraries",
@@ -792,6 +794,18 @@ enum Genres {
         "Urban & Street Lit", "Visionary & Metaphysical", "War & Military", "Westerns", "Women",
         "World Literature",
     ]
+
+    /// The film industry's movie genres (TMDB's public list, themoviedb.org, 2026).
+    static let screenplay: [String] = [
+        "Action", "Adventure", "Animation", "Comedy", "Crime", "Documentary", "Drama",
+        "Family", "Fantasy", "History", "Horror", "Music", "Mystery", "Romance",
+        "Science Fiction", "TV Movie", "Thriller", "War", "Western",
+    ]
+
+    /// The list for a form: a screenplay's movies, otherwise the book trade's.
+    static func all(for form: BookForm?) -> [String] {
+        form == .screenplay ? screenplay : book
+    }
 }
 
 /// The genre as a menu (a framed button like a pop-up); None clears it.
@@ -839,13 +853,14 @@ struct FormMenu: View {
 
 struct GenreMenu: View {
     let genre: String?
+    let form: BookForm?
     let choose: (String?) -> Void
 
     var body: some View {
         Menu {
             Button("None") { choose(nil) }
             Divider()
-            ForEach(Genres.all, id: \.self) { name in
+            ForEach(Genres.all(for: form), id: \.self) { name in
                 Toggle(name, isOn: Binding(get: { name == genre }, set: { if $0 { choose(name) } }))
             }
         } label: {
@@ -868,6 +883,6 @@ struct GenreMenu: View {
         .buttonStyle(.plain)
         .menuIndicator(.hidden)
         .fixedSize()
-        .help("The book trade’s standard fiction genres")
+        .help(form == .screenplay ? "The film industry’s standard movie genres" : "The book trade’s standard fiction genres")
     }
 }

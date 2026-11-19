@@ -228,7 +228,8 @@ The form:
   from Draft and Manuscript on 2026-11-09 so neither clashes with Mark as Draft or the
   manuscript as against a rewrite);
   **Form**, a menu (Novel, Novella, Short Story, Essay, Notebook); **Genre**, a menu of BISAC's fiction headings
-  (bisg.org/fiction); **Target** with a percentage chip and a rule. No hints in any field.
+  (bisg.org/fiction) for a book, or the film industry's movie genres (TMDB's list) for a
+  screenplay; **Target** with a percentage chip and a rule. No hints in any field.
 - **Synopsis**; **Author**: only the author's name, chosen from Settings › Authors, where the
   name, pen name, address, email, phone and **previous works** are kept (owner, 2026-11-13).
   The story keeps a copy of the details for the title page; none of them show on its page.

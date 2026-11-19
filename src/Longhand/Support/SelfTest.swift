@@ -1346,6 +1346,11 @@ enum SelfTest {
             check(back?.stage == .writing && back?.form == .novella && back?.genre == "Crime"
                   && back?.authorEmail == "writer@example.com" && back?.hideChapterNumbers == true,
                   "book info: stage, form, genre, author and chapter numbers are kept")
+            check(Genres.all(for: .screenplay).contains("Science Fiction")
+                  && !Genres.all(for: .screenplay).contains("Literary")
+                  && Genres.all(for: .novel).contains("Literary")
+                  && Genres.all(for: nil) == Genres.all(for: .novel),
+                  "genres: a screenplay gets the movie list, everything else the book trade’s")
             var shown = SceneInfo()
             shown.setShows(.reading, false)
             let factsBack = (try? JSONEncoder().encode(shown)).flatMap { try? JSONDecoder().decode(SceneInfo.self, from: $0) }
