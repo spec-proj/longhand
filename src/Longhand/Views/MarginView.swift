@@ -15,7 +15,9 @@ struct MarginView: View {
             tabs
             Rectangle().fill(Color(PaperTheme.hairline)).frame(height: 1)
             Group {
-                if current == .notes {
+                if current == .names {
+                    NamesPane()
+                } else if current == .notes {
                     NotesPane()
                 } else if current == .changes {
                     ChangesPane(changes: store.versions.changes)
@@ -73,7 +75,7 @@ struct MarginView: View {
     /// The tab shown. History became part of Versions (2026-11-08).
     private var current: MarginStore.Tab {
         let chosen = MarginStore.Tab(rawValue: tab) ?? .comments
-        if inLibrary, chosen == .comments { return .notes }
+        if inLibrary, chosen == .comments || chosen == .names { return .notes }
         return chosen == .history ? .changes : chosen
     }
 
@@ -92,6 +94,10 @@ struct MarginView: View {
             }
             tabButton(.notes, title: "Notes", count: nil)
             divider
+            if !inLibrary {
+                tabButton(.names, title: "Names", count: nil)
+                divider
+            }
             tabButton(.changes, title: "Changes", count: nil) {
                 ChangeCount(changes: store.versions.changes, selection: store.selection)
             }

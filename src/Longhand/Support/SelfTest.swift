@@ -111,7 +111,14 @@ enum SelfTest {
             store.move(item(second), by: -1)
             check(chapters().first?.scenes.first?.title == second.title, "scene moves up in order")
             if let top = chapters().first?.scenes.first {
+                store.margin.setInfo(SceneInfo(synopsis: "To go", status: .draft, target: 300), for: top.url)
+                let before = Discard.log.count
                 store.delete(item(top))
+                let letGo = Discard.log.dropFirst(before)
+                check(letGo.filter(\.kept).count == 1 && letGo.first(where: \.kept)?.url == top.url,
+                      "trash: deleting a scene sends only the scene to the Trash")
+                check(letGo.contains { !$0.kept && $0.url.path.contains("/.longhand/scenes/") },
+                      "trash: its details are removed quietly, not left in the Trash")
             }
         }
         check(chapters().first?.scenes.count == 1, "scene deletes")
@@ -1350,7 +1357,41 @@ enum SelfTest {
                   && !Genres.all(for: .screenplay).contains("Literary")
                   && Genres.all(for: .novel).contains("Literary")
                   && Genres.all(for: nil) == Genres.all(for: .novel),
-                  "genres: a screenplay gets the movie list, everything else the book trade’s")
+                  "genres: a screenplay gets the movie list, a novel the book trade’s")
+            check(Genres.all(for: .novella) == Genres.all(for: .novel) && Genres.all(for: .shortStory) == Genres.all(for: .novel),
+                  "genres: novels, novellas and short stories share the book trade’s list")
+            let ownLists = BookForm.allCases.filter { ![.novel, .novella, .shortStory].contains($0) }.map { Genres.all(for: $0) }
+            check(ownLists.allSatisfy { $0 != Genres.all(for: .novel) && Set($0).count == $0.count && !$0.isEmpty },
+                  "genres: poetry, lyrics, essays, screenplays and notebooks each have a list of their own, with no repeats")
+            check(Genres.all(for: .notebook).contains("Diary") && Genres.all(for: .poetry).contains("Sonnet")
+                  && Genres.all(for: .lyrics).contains("Hip-Hop & Rap") && Genres.all(for: .essay).contains("Memoir"),
+                  "genres: a notebook offers Diary, poetry Sonnet, lyrics Hip-Hop, essays Memoir")
+            check(BookForm.allCases.filter { Genres.label(for: $0) == "Type" } == [.poetry, .essay, .notebook]
+                  && Genres.label(for: nil) == "Genre",
+                  "genres: the menu is called Type where the choices are kinds, Genre elsewhere")
+            // MARK: Contents on a story's page, by form (issue #8)
+            check(ContentsKind.of(form: .novel, shape: .chaptersAndScenes) == .chapters
+                  && ContentsKind.of(form: .shortStory, shape: .chapters) == .chapters
+                  && ContentsKind.of(form: .screenplay, shape: .document) == .chapters,
+                  "contents: novels, collections with chapters and screenplays keep the chapter list")
+            check(ContentsKind.of(form: .poetry, shape: .document) == .poem && ContentsKind.of(form: .lyrics, shape: .document) == .poem
+                  && ContentsKind.of(form: .poetry, shape: .scenes) == .poems && ContentsKind.of(form: .lyrics, shape: .scenes) == .poems,
+                  "contents: one poem or song shows itself, a book of them lists each")
+            check(ContentsKind.of(form: .shortStory, shape: .document) == .headings && ContentsKind.of(form: .essay, shape: .document) == .headings
+                  && ContentsKind.of(form: .notebook, shape: .document) == .headings,
+                  "contents: a single story, essay or note lists its headings")
+            let essay = DocumentSummary(text: "# Title\n\nA long opening paragraph " + String(repeating: "word ", count: 300)
+                                        + "\n\n## Departure\n\n" + String(repeating: "word ", count: 600)
+                                        + "\n\n### Midnight\n\nShort.\n\n## Arrival\n\nEnd.\n")
+            check(essay.headings.map(\.title) == ["Departure", "Midnight", "Arrival"] && essay.headings.map(\.level) == [2, 3, 2],
+                  "contents: a document's headings are listed, its title is not")
+            check(essay.headings.map(\.id) == [1, 2, 3], "contents: each heading keeps its place in the outline, for jumping to it")
+            check(essay.headings.map(\.page) == [2, 4, 4], "contents: headings fall on the page their words reach (250 words a page)")
+            let headless = DocumentSummary(text: "# Salt\n\nShe set her suitcase down.\n\n***\n\nThe second thing was the salt.\n")
+            check(headless.headings.isEmpty && headless.opening == "She set her suitcase down.\n\nThe second thing was the salt.",
+                  "contents: with no headings, the opening is the first paragraphs (a short one takes the next), not a break")
+            let verse = DocumentSummary(text: "# Tide\n\nThe ferryman's wife\n    kept the tables\n\neach *low water*\n")
+            check(verse.body == "The ferryman's wife\n    kept the tables\n\neach *low water*", "contents: a poem keeps its lines and indents, without its title")
             var shown = SceneInfo()
             shown.setShows(.reading, false)
             let factsBack = (try? JSONEncoder().encode(shown)).flatMap { try? JSONDecoder().decode(SceneInfo.self, from: $0) }
@@ -1687,6 +1728,156 @@ enum SelfTest {
                 check(all().contains { $0.title == was } && all().count == count, "rename: and back again")
             } else {
                 check(false, "rename: a scene to rename")
+            }
+        }
+
+        // MARK: Pinned stories and linked stories (issues #13 and #14)
+
+        do {
+            store.createBook(title: "Link Novel")
+            store.createBook(title: "Link Notes")
+            func story(_ title: String) -> Book? { store.library?.books.first { $0.title == title } }
+            func asItem(_ book: Book) -> ManuscriptItem { ManuscriptItem(url: book.url, title: book.title, order: book.order, kind: .book) }
+            if let novel = story("Link Novel"), let notes = story("Link Notes") {
+                store.margin.setPinned(true, for: novel.url)
+                check(store.pinnedBooks.map(\.title) == ["Link Novel"], "pins: a story is pinned")
+                check(store.margin.info(for: novel.url).pinned == true && store.margin.info(for: notes.url).isEmpty,
+                      "pins: only that story carries the pin")
+                store.margin.setPinned(false, for: novel.url)
+                check(store.pinnedBooks.isEmpty && store.margin.info(for: novel.url).isEmpty, "pins: unpinning leaves no trace in the story's details")
+                store.margin.setPinned(true, for: novel.url)
+
+                store.margin.link(novel.url, to: notes.title)
+                store.margin.link(novel.url, to: notes.title)
+                check(store.links(from: novel).map(\.title) == ["Link Notes"], "links: a story shows the stories it links to, once")
+                check(store.links(to: notes).map(\.title) == ["Link Novel"] && store.links(from: notes).isEmpty,
+                      "links: the other story shows the link too, without storing one of its own")
+                let stored = (try? JSONEncoder().encode(store.margin.info(for: novel.url))).flatMap { try? JSONDecoder().decode(SceneInfo.self, from: $0) }
+                check(stored?.links == ["Link Notes"] && stored?.pinned == true, "links: links and pins are kept in the story's details")
+
+                store.rename(asItem(notes), to: "Link Planning")
+                check(store.links(from: novel).map(\.title) == ["Link Planning"], "links: renaming the linked story keeps the link")
+                if let renamed = story("Link Planning") {
+                    store.delete(asItem(renamed))
+                    check(store.links(from: novel).isEmpty, "links: a link to a story that is gone shows nothing")
+                }
+                if let novel = story("Link Novel") { store.delete(asItem(novel)) }
+            } else {
+                check(false, "links: two stories to link")
+            }
+        }
+
+        // MARK: Tracked names (issue #24)
+
+        do {
+            let sample = "Mara met Marathon runners. MARA nodded; Mara’s cup, Mara's cup. A mara bird. Mara Voss."
+            check(NameMatch.ranges(of: "Mara", in: sample).count == 5,
+                  "names: whole words only, with possessives and capitals (not Marathon, not the lower-case bird)")
+            check(NameMatch.replacing("Mara", with: "Maren", in: sample)
+                  == "Maren met Marathon runners. MAREN nodded; Maren’s cup, Maren's cup. A mara bird. Maren Voss.",
+                  "names: a change keeps possessives, and capitals stay capitals")
+            check(NameMatch.replacing("Mara Voss", with: "Maren Ode", in: "Mara  Voss and Mara Vossen") == "Maren Ode and Mara Vossen",
+                  "names: a name of two words matches across spacing, and only as a whole")
+            let edits = NameMatch.edits(replacing: "Mara", with: "Marguerite", in: "Mara and Mara")
+            check(NameMatch.map(0, through: edits) == 0 && NameMatch.map(5, through: edits) == 5 + 6
+                  && NameMatch.map(13, through: edits, end: true) == 13 + 12 && NameMatch.map(2, through: edits) == 0,
+                  "names: positions in the old text map to the new, a place inside a name going to its start (or end)")
+            let regexes = ["Mara"].compactMap(NameMatch.regex(for:))
+            check(NameMatch.range(at: 2, in: "A Mara came" as NSString, among: regexes) == NSRange(location: 2, length: 4)
+                  && NameMatch.range(at: 1, in: "A Mara came" as NSString, among: regexes) == nil
+                  && NameMatch.range(at: 6, in: "A Mara came" as NSString, among: regexes) == nil,
+                  "names: the pointer finds the name it is over, and not the space beside it")
+
+            store.createBook(title: "Names Test")
+            if let book = store.library?.books.first(where: { $0.title == "Names Test" }),
+               let scene = book.chapters.first?.scenes.first, let lib = store.libraryURL {
+                let body = "Mara walked in. “Mara,” said Tomas.\n\nLater, MARA left and Marathon began.\n"
+                try? body.write(to: scene.url, atomically: true, encoding: .utf8)
+                store.margin.trackName("Mara", in: book.url)
+                store.margin.trackName("  Mara ", in: book.url)
+                store.margin.trackName("Tomas", in: book.url)
+                check(store.margin.trackedNames(of: book.url) == ["Mara", "Tomas"], "names: a name is tracked once")
+
+                // Comment, note, synopsis and a story note that all mention her.
+                let rel = LibraryStore.relativePath(scene.url, in: lib) ?? ""
+                let key = (rel as NSString).deletingPathExtension
+                let at = (body as NSString).range(of: "Tomas")
+                let commentJSON = "{\"version\":1,\"comments\":[{\"id\":\"\(UUID().uuidString)\",\"created\":\"2026-11-20T10:00:00Z\",\"text\":\"Ask Mara about this\",\"resolved\":false,\"location\":\(at.location),\"length\":\(at.length),\"quote\":\"Tomas\",\"prefix\":\"“Mara,” said \",\"suffix\":\"\"}]}"
+                let meta = lib.appendingPathComponent(".longhand")
+                for (folder, ext, text) in [("comments", ".json", commentJSON), ("notes", ".md", "Mara is the ferrywoman.\n")] {
+                    let file = meta.appendingPathComponent("\(folder)/\(key)\(ext)")
+                    try? fm.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+                    try? text.write(to: file, atomically: true, encoding: .utf8)
+                }
+                store.margin.setInfo(SceneInfo(synopsis: "Mara arrives."), for: scene.url)
+                let storyNote = book.url.appendingPathComponent("Notes/Cast.md")
+                try? fm.createDirectory(at: storyNote.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try? "Mara is the ferrywoman.\n".write(to: storyNote, atomically: true, encoding: .utf8)
+
+                let counted = await store.occurrences(of: ["Mara"], in: book)["Mara"]
+                check(counted?.places == 3 && counted?.scenes == 1, "names: the tab counts the places and scenes")
+
+                let changedBy = await withCheckedContinuation { (go: CheckedContinuation<Bool, Never>) in
+                    _ = store.renameName("Mara", to: "Maren", in: book) { go.resume(returning: $0) }
+                }
+                let after = disk(scene.url)
+                check(after == "Maren walked in. “Maren,” said Tomas.\n\nLater, MAREN left and Marathon began.\n",
+                      "names: changing a name changes it in every place, whole words only")
+                check(changedBy, "names: the change is committed")
+                let comment = store.margin.readComments(for: scene.url).first
+                let now = (after as NSString).range(of: "Tomas")
+                check(comment?.text == "Ask Maren about this" && comment?.location == now.location && comment?.length == now.length
+                      && comment?.prefix == "“Maren,” said ",
+                      "names: a comment's words change, and it stays on its passage")
+                check(disk(meta.appendingPathComponent("notes/\(key).md")) == "Maren is the ferrywoman.\n"
+                      && disk(storyNote) == "Maren is the ferrywoman.\n",
+                      "names: scene notes and the story's notes change")
+                check(store.margin.info(for: scene.url).synopsis == "Maren arrives.", "names: a synopsis changes")
+                check(store.margin.trackedNames(of: book.url) == ["Maren", "Tomas"], "names: the tracked name is its new self, in its place")
+                let subjects = git("log", "--format=%s")
+                check(subjects.contains("Mara was changed to Maren") && subjects.contains("Before changing Mara to Maren"),
+                      "names: the story is committed before, and after as “Mara was changed to Maren”")
+                check(git("log", "-1", "--format=%B").contains("Longhand-Version:"), "names: the change is a version of the scene it touched")
+                if let current = store.library?.books.first(where: { $0.title == "Names Test" }) {
+                    store.delete(ManuscriptItem(url: current.url, title: current.title, order: current.order, kind: .book))
+                }
+            } else {
+                check(false, "names: a story to track names in")
+            }
+
+            // One character, several names.
+            store.createBook(title: "Group Test")
+            if let group = store.library?.books.first(where: { $0.title == "Group Test" }), let scene = group.chapters.first?.scenes.first {
+                let margin = store.margin
+                margin.trackName("Mara, Mara Voss, Ms. Voss, Mara", in: group.url)
+                check(margin.nameGroups(of: group.url).map(\.names) == [["Mara", "Mara Voss", "Ms. Voss"]],
+                      "names: commas make one character of several names, each once")
+                check(margin.trackedNames(of: group.url) == ["Mara", "Mara Voss", "Ms. Voss"], "names: the page hovers over every name of a group")
+                check(!margin.trackName("Ms. Voss", in: group.url), "names: a name in a group is not tracked again on its own")
+                check(NameMatch.count(ofAny: ["Mara", "Mara Voss", "Ms. Voss"], in: ["Mara Voss met Ms. Voss and Mara."]) == (3, 1),
+                      "names: a character's count is its places, Mara inside Mara Voss counted once")
+                margin.addNames("Maz", toGroupOf: "Mara", in: group.url)
+                check(margin.nameGroups(of: group.url).first?.names.last == "Maz", "names: another name is added to a character")
+                margin.untrackName("Maz", in: group.url)
+
+                try? "Mara Voss met Ms. Voss and Mara. “Mara,” said Ms. Voss.\n".write(to: scene.url, atomically: true, encoding: .utf8)
+                _ = await withCheckedContinuation { (go: CheckedContinuation<Bool, Never>) in
+                    _ = store.renameName("Mara", to: "Maren", in: group) { go.resume(returning: $0) }
+                }
+                check(disk(scene.url) == "Maren Voss met Ms. Voss and Maren. “Maren,” said Ms. Voss.\n", "names: changing a main name changes it in the text, in its longer names too")
+                check(margin.nameGroups(of: group.url).map(\.names) == [["Maren", "Maren Voss", "Ms. Voss"]],
+                      "names: the other names that held it follow the main name")
+                margin.renameTracked("Ms. Voss", to: "Mrs. Voss", in: group.url)
+                check(margin.nameGroups(of: group.url).map(\.names) == [["Maren", "Maren Voss", "Mrs. Voss"]], "names: changing one of the other names changes only that one")
+                margin.untrackName("Maren", in: group.url)
+                check(margin.nameGroups(of: group.url).map(\.main) == ["Maren Voss"], "names: the main name going hands that to the next")
+                margin.untrackGroup("Maren Voss", in: group.url)
+                check(margin.nameGroups(of: group.url).isEmpty, "names: a character stops being tracked")
+                if let current = store.library?.books.first(where: { $0.title == "Group Test" }) {
+                    store.delete(ManuscriptItem(url: current.url, title: current.title, order: current.order, kind: .book))
+                }
+            } else {
+                check(false, "names: a story to group names in")
             }
         }
 
@@ -2769,6 +2960,22 @@ enum SelfTest {
             store.margin.setCover(of: book.url, from: file, cropTo: CGRect(x: 0, y: 0, width: 125.0 / 300, height: 1))
             check(middle(store.margin.cover(of: book.url)).red > 0.8, "cover: setting with cropTo crops on initial set")
             store.margin.removeCover(of: book.url)
+            // A photograph's worth of pixels is kept at a cover's worth.
+            if let context = CGContext(data: nil, width: 6000, height: 4000, bitsPerComponent: 8, bytesPerRow: 0,
+                                       space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                       bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue),
+               let image = context.makeImage(),
+               let jpeg = NSBitmapImageRep(cgImage: image).representation(using: .jpeg, properties: [:]) {
+                let big = fm.temporaryDirectory.appendingPathComponent("big-\(UUID().uuidString).jpg")
+                try? jpeg.write(to: big)
+                store.margin.setCover(of: book.url, from: big)
+                let kept = store.margin.coverSource(of: book.url)?.cgImage(forProposedRect: nil, context: nil, hints: nil)
+                let cut = store.margin.cover(of: book.url)?.cgImage(forProposedRect: nil, context: nil, hints: nil)
+                check(kept?.width == 2400 && kept?.height == 1600, "cover: a large picture is kept at 2400 pixels on its longer side")
+                check((cut?.width ?? 9999) <= 1600, "cover: the cover itself is never wider than 1600 pixels")
+                store.margin.removeCover(of: book.url)
+                try? fm.removeItem(at: big)
+            }
             try? fm.removeItem(at: file)
         }
 

@@ -52,6 +52,24 @@ enum Commands {
         margin.addCommentOnSelection()
     }
 
+    /// Starts tracking the selected text as a name (the word at the caret if nothing is
+    /// selected), and opens the margin on Names.
+    static func trackName(store: LibraryStore) {
+        let margin = store.margin
+        let window = NSApp.keyWindow ?? NSApp.mainWindow
+        let page = (window?.firstResponder as? NSTextView).flatMap { $0.isFieldEditor ? nil : $0 } ?? margin.textView
+        guard let page, let book = margin.bookURL ?? store.openBook else { NSSound.beep(); return }
+        var range = page.selectedRange()
+        if range.length == 0 {
+            range = page.selectionRange(forProposedRange: range, granularity: .selectByWord)
+        }
+        let name = (page.string as NSString).substring(with: range).trimmingCharacters(in: .whitespacesAndNewlines)
+        let defaults = UserDefaults.standard
+        defaults.set(true, forKey: "showMargin")
+        defaults.set(MarginStore.Tab.names.rawValue, forKey: "marginTab")
+        if name.isEmpty || !margin.trackName(name, in: book) { NSSound.beep() }
+    }
+
     /// Bold or italic on the page being edited.
     static func format(_ style: MarkdownFormat.Style, margin: MarginStore) {
         let window = NSApp.keyWindow ?? NSApp.mainWindow

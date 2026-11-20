@@ -38,6 +38,8 @@ struct SidebarView: View {
         var collection: Bool?
         /// The author as a blank cover prints them (pen name, else name).
         var byline = ""
+        /// Shown at the top of the Library as a cover, not in the list below it.
+        var pinned = false
     }
 
     @State private var collapsedChapters: Set<URL> = []
@@ -147,12 +149,16 @@ struct SidebarView: View {
                                     endZone(of: chapter, last: index == book.chapters.count - 1)
                                 }
                             } else {
-                                // Folders first, each a group that opens and closes, then
-                                // the stories at the top of the library.
+                                // Pinned stories first, as covers; then folders, each a group
+                                // that opens and closes, then the stories at the top of the library.
+                                let pinned = library.books.filter { looks[$0.url]?.pinned == true }
+                                if !pinned.isEmpty {
+                                    pinnedStrip(pinned)
+                                }
                                 ForEach(library.folders) { folder in
                                     folderRow(folder, count: library.books(in: folder.url).count)
                                     if !collapsedFolders.contains(folder.url) {
-                                        ForEach(library.books(in: folder.url)) { book in
+                                        ForEach(library.books(in: folder.url).filter { looks[$0.url]?.pinned != true }) { book in
                                             libraryRow(book).padding(.leading, 14)
                                         }
                                     }
@@ -162,7 +168,7 @@ struct SidebarView: View {
                                         .padding(.leading, Layout.pad)
                                         .padding(.vertical, 6)
                                 }
-                                ForEach(library.books(in: nil)) { book in
+                                ForEach(library.books(in: nil).filter { looks[$0.url]?.pinned != true }) { book in
                                     libraryRow(book)
                                 }
                             }
@@ -228,8 +234,8 @@ struct SidebarView: View {
             for (url, info) in infos {
                 let byline = [info.authorPenName, info.authorName].compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
                     .first { !$0.isEmpty } ?? ""
-                guard info.stage != nil || info.hideChapterNumbers == true || info.form != nil || !(info.genre ?? "").isEmpty || !byline.isEmpty else { continue }
-                next[url] = Look(stage: info.stage, hideNumbers: info.hideChapterNumbers == true, form: info.form, genre: info.genre, collection: info.collection, byline: byline)
+                guard info.stage != nil || info.hideChapterNumbers == true || info.form != nil || !(info.genre ?? "").isEmpty || !byline.isEmpty || info.pinned == true else { continue }
+                next[url] = Look(stage: info.stage, hideNumbers: info.hideChapterNumbers == true, form: info.form, genre: info.genre, collection: info.collection, byline: byline, pinned: info.pinned == true)
             }
             if next != looks { looks = next }
             var marked: [URL: SceneInfo.Status] = [:]
@@ -797,8 +803,43 @@ struct SidebarView: View {
         }
     }
 
+    /// The pinned stories as covers, in a grid at the top of the Library, the way a browser
+    /// keeps its pinned tabs: a click shows the story's page, a double-click goes into it.
+    private func pinnedStrip(_ books: [Book]) -> some View {
+        VStack(spacing: 0) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 64, maximum: 72), spacing: 12, alignment: .top)], alignment: .leading, spacing: 12) {
+                ForEach(books) { book in
+                    let look = looks[book.url] ?? Look()
+                    let selected = store.selection == .book(book.url)
+                    BookCover(title: book.title, image: cover(of: book), width: 64, form: look.form, byline: look.byline, collection: look.collection)
+                        .overlay(rounded(4).strokeBorder(Color(PaperTheme.ink), lineWidth: selected ? 2 : 0).padding(-3))
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            takeKeys()
+                            if store.selection != .book(book.url) { store.selection = .book(book.url) }
+                            if (NSApp.currentEvent?.clickCount ?? 1) >= 2 { store.openBook = book.url }
+                        }
+                        .contextMenu { bookMenu(book) }
+                        .help(book.title)
+                        .id("pinned:" + book.url.path)
+                }
+            }
+            .padding(.horizontal, Layout.pad + 3)
+            .padding(.vertical, 10)
+            Rectangle()
+                .fill(Color(PaperTheme.hairline))
+                .frame(height: 1)
+                .padding(.leading, Layout.pad)
+                .padding(.bottom, 6)
+        }
+    }
+
     @ViewBuilder
     private func bookMenu(_ book: Book) -> some View {
+        Button(looks[book.url]?.pinned == true ? "Unpin" : "Pin") {
+            store.margin.setPinned(looks[book.url]?.pinned != true, for: book.url)
+        }
+        Divider()
         if book.shape.hasChapters {
             Button("New \(store.names(of: book.url).chapter)") {
                 store.selection = .book(book.url)
@@ -937,7 +978,7 @@ struct SidebarView: View {
     private func headingRow(_ heading: OutlineHeading, in document: URL) -> some View {
         Button {
             takeKeys()
-            goTo(heading, in: document)
+            store.goTo(heading, in: document)
         } label: {
             HStack(spacing: 0) {
                 if let number = heading.number {
@@ -979,29 +1020,6 @@ struct SidebarView: View {
         let text = store.fileText(at: document.url)
         let next = document.isScreenplay ? OutlineHeading.screenplay(in: text) : OutlineHeading.all(in: text)
         if next != outline { outline = next }
-    }
-
-    private func goTo(_ heading: OutlineHeading, in document: URL) {
-        if store.selection != .scene(document) { store.selection = .scene(document) }
-        let screenplay = document.pathExtension.lowercased() == ProseFile.fountain
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-            // A screenplay being read: its page.
-            if screenplay, store.viewMode == .read {
-                NotificationCenter.default.post(name: ScreenplayReader.goToScene, object: heading.id)
-                return
-            }
-            // The page's own text, which may be newer than the file: the same heading by order.
-            let ranges = { (text: String) in screenplay ? Fountain.headings(in: text).map(\.range) : OutlineHeading.ranges(in: text) }
-            guard let page = store.margin.textView,
-                  let range = ranges(page.string).dropFirst(heading.id).first else { return }
-            page.window?.makeFirstResponder(page)
-            page.setSelectedRange(NSRange(location: NSMaxRange(range), length: 0))
-            page.scrollRangeToVisible(range)
-            if let line = page.lineRects(of: range).first, let clip = page.enclosingScrollView?.contentView {
-                clip.scroll(to: NSPoint(x: clip.bounds.minX, y: max(0, line.minY - 24)))
-                page.enclosingScrollView?.reflectScrolledClipView(clip)
-            }
-        }
     }
 
     /// A chapters-only story's chapter: one row for the chapter and its one file. Clicking it

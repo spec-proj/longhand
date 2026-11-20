@@ -16,8 +16,8 @@ settings:
     ENABLE_HARDENED_RUNTIME: NO
     ENABLE_APP_SANDBOX: NO
     DEVELOPMENT_TEAM: ""
-    MARKETING_VERSION: "0.9.93"
-    CURRENT_PROJECT_VERSION: "14"
+    MARKETING_VERSION: "0.9.94"
+    CURRENT_PROJECT_VERSION: "15"
     # Smaller app (2026-11-14): unused code left out, and the release build stripped of the
     # symbols only a debugger needs (they stay in the .dSYM beside the build).
     DEAD_CODE_STRIPPING: YES

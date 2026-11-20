@@ -295,10 +295,10 @@ enum Snapshot {
         // LONGHAND_UPDATE=0.9.9: the status bar as if a newer Longhand were out.
         if let version = environment["LONGHAND_UPDATE"] { Updates.shared.pretend(version) }
         if environment["LONGHAND_CLEARDESK"] == "1" { store.deskCleared = true }
-        // LONGHAND_LIBRARYVIEW=1: the Library, with the first book chosen (its Book Info page).
+        // LONGHAND_LIBRARYVIEW=1: the Library, with the first book (or LONGHAND_BOOK=n) chosen (its Book Info page).
         if environment["LONGHAND_LIBRARYVIEW"] == "1" {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
-                if let book = store.library?.books.first { store.selection = .book(book.url) }
+                if let book = store.library?.books.dropFirst((bookNumber ?? 1) - 1).first { store.selection = .book(book.url) }
                 store.openBook = nil
             }
         }

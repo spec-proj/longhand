@@ -259,6 +259,16 @@ final class VersionStore: ObservableObject {
 
     /// Saves a version of each of these scenes (paths in the library), with one note. False
     /// (through `done`) when there was nothing to save.
+    /// Commits whatever is waiting under a message of its own (nothing waiting: nothing made).
+    func record(_ message: String, done: @escaping @MainActor (Bool) -> Void = { _ in }) {
+        guard let root, available else { return done(false) }
+        run(root) { root in Git.commitAll(root, message: message) } then: { [weak self] saved in
+            self?.refresh(remote: false)
+            if saved { self?.backUp() }
+            done(saved)
+        }
+    }
+
     func saveVersions(of scenes: [String], note: String, done: @escaping @MainActor (Bool) -> Void = { _ in }) {
         guard let root, available, !scenes.isEmpty else { return done(false) }
         let note = Self.clean(note)

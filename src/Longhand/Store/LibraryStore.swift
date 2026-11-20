@@ -278,7 +278,7 @@ final class LibraryStore: ObservableObject {
 
     /// After Git replaced the files (a restore, or moving to or from a rewrite): reads the
     /// library again, and the open scene, notes and comments with it.
-    private func filesReplaced() {
+    func filesReplaced() {
         CanonicalPaths.shared.forget()
         guard let root = libraryURL else { return }
         margin.open(root: root)
@@ -1035,7 +1035,7 @@ final class LibraryStore: ObservableObject {
         }
         saveNow()
         do {
-            try FileManager.default.trashItem(at: folder, resultingItemURL: nil)
+            try Discard.toTrash(folder)
         } catch {
             errorMessage = "Couldn’t move it to the Trash."
             return
@@ -1181,6 +1181,9 @@ final class LibraryStore: ObservableObject {
             }
             moves.append((item.url, newURL))
             follow(moves)
+            if item.kind == .book, let renamed = book(for: newURL), renamed.title != item.title {
+                margin.renameLinks(from: item.title, to: renamed.title)
+            }
         } catch {
             errorMessage = "Couldn’t rename \(item.kind == .book ? "the story" : item.kind == .chapter ? "the chapter" : "the scene")."
         }
@@ -1647,7 +1650,7 @@ final class LibraryStore: ObservableObject {
             text = [head, piece, tail].filter { !$0.isEmpty }.joined(separator: "\n\n") + (tail.isEmpty ? "\n" : "")
             do {
                 try text.write(to: document.url, atomically: true, encoding: .utf8)
-                try FileManager.default.trashItem(at: sceneURL, resultingItemURL: nil)
+                try Discard.toTrash(sceneURL)
             } catch {
                 errorMessage = "Couldn’t restore that passage."
                 return
@@ -1722,7 +1725,7 @@ final class LibraryStore: ObservableObject {
         let old = book.chapters.flatMap { $0.implicit ? $0.scenes.map(\.url) : [$0.url] }
         if let active = activeSceneURL, old.contains(where: { Self.relocated(active, from: $0, to: $0) != nil }) { activeSceneURL = nil }
         for url in old {
-            try? FileManager.default.trashItem(at: url, resultingItemURL: nil)
+            try? Discard.toTrash(url)
             margin.trash(url)
         }
         setShape(.document, of: book.url)
@@ -1766,7 +1769,7 @@ final class LibraryStore: ObservableObject {
             margin.splitComments(of: document.url, into: made)
             if let first = made.first?.scene { margin.mergeNotes([(book.title, document.url)], into: first) }
             if activeSceneURL == document.url { activeSceneURL = nil }
-            try? FileManager.default.trashItem(at: document.url, resultingItemURL: nil)
+            try? Discard.toTrash(document.url)
             margin.trash(document.url)
             setShape(.chaptersAndScenes, of: book.url)
             reload(select: .none)
@@ -1827,7 +1830,7 @@ final class LibraryStore: ObservableObject {
         saveNow()
 
         do {
-            try FileManager.default.trashItem(at: item.url, resultingItemURL: nil)
+            try Discard.toTrash(item.url)
             margin.trash(item.url)
             if let active = activeSceneURL, Self.relocated(active, from: item.url, to: item.url) != nil {
                 activeSceneURL = nil

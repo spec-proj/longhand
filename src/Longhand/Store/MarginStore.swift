@@ -81,6 +81,13 @@ struct SceneInfo: Codable, Equatable {
     var cut: Cut?
     /// A colour on the scene's index card (the writer's own meaning: a POV, a thread).
     var label: CardLabel?
+    /// Kept at the top of the Library as a cover (a story's own setting, so it follows the
+    /// story to another Mac).
+    var pinned: Bool?
+    /// The stories this one links to, by title: a novel's planning notebook, say. Titles, not
+    /// places, so a link survives the story being renumbered or moved into a folder; renaming
+    /// a story renames the links to it (`MarginStore.renameLinks`).
+    var links: [String]?
 
     struct Cut: Codable, Equatable {
         /// The chapter it was in (or, for a passage, the document), by title.
@@ -114,6 +121,7 @@ struct SceneInfo: Codable, Equatable {
             && stage == nil && form == nil
             && [genre, authorName, authorPenName, authorAddress, authorEmail, authorPhone, previousWorks].allSatisfy { ($0 ?? "").isEmpty }
             && hideChapterNumbers != true && (hiddenFacts ?? []).isEmpty && shape == nil && cut == nil && collection == nil && label == nil
+            && pinned != true && (links ?? []).isEmpty
     }
 
     init(synopsis: String = "", status: Status? = nil, target: Int? = nil) {
@@ -145,6 +153,8 @@ struct SceneInfo: Codable, Equatable {
         shape = try? container.decodeIfPresent(BookShape.self, forKey: .shape)
         collection = try? container.decodeIfPresent(Bool.self, forKey: .collection)
         cut = try? container.decodeIfPresent(Cut.self, forKey: .cut)
+        pinned = try? container.decodeIfPresent(Bool.self, forKey: .pinned)
+        links = try? container.decodeIfPresent([String].self, forKey: .links)
     }
 }
 
@@ -277,7 +287,7 @@ struct BookNote: Identifiable, Equatable {
 /// when an item is renamed, reordered or trashed.
 @MainActor
 final class MarginStore: ObservableObject {
-    enum Tab: String { case comments, notes, history, changes }
+    enum Tab: String { case comments, notes, names, history, changes }
 
     // MARK: Published state
 
@@ -388,6 +398,7 @@ final class MarginStore: ObservableObject {
         bookURL = nil
         bookNotes = []
         openBookNote = nil
+        nameCache = [:]
     }
 
     /// Counts open comments and reads the details of every scene (called whenever the
@@ -903,7 +914,7 @@ final class MarginStore: ObservableObject {
 
     func trashBookNote(_ note: BookNote) {
         saveNow()
-        try? FileManager.default.trashItem(at: note.url, resultingItemURL: nil)
+        try? Discard.toTrash(note.url)
         onFilesChanged()
         if openBookNote?.url == note.url { openBookNote = nil }
         reloadBookNotes()
@@ -939,7 +950,7 @@ final class MarginStore: ObservableObject {
         for item in staged {
             try? fm.createDirectory(at: item.destination.deletingLastPathComponent(), withIntermediateDirectories: true)
             if fm.fileExists(atPath: item.destination.path) {
-                try? fm.trashItem(at: item.destination, resultingItemURL: nil)
+                Discard.bookkeeping(item.destination)
             }
             try? fm.moveItem(at: item.temp, to: item.destination)
         }
@@ -964,7 +975,7 @@ final class MarginStore: ObservableObject {
         }
     }
 
-    /// Sends an item's comments and notes to the Trash with it.
+    /// Lets go of an item's comments, notes and details when it goes to the Trash.
     func trash(_ item: URL) {
         saveNow()
         coverCache = [:]
@@ -973,7 +984,7 @@ final class MarginStore: ObservableObject {
         for (folder, ext) in Self.sidecars {
             for path in [key + ext, key] {
                 let url = meta.appendingPathComponent("\(folder)/\(path)")
-                if fm.fileExists(atPath: url.path) { try? fm.trashItem(at: url, resultingItemURL: nil) }
+                if fm.fileExists(atPath: url.path) { Discard.bookkeeping(url) }
             }
         }
         objectWillChange.send()
@@ -981,6 +992,176 @@ final class MarginStore: ObservableObject {
         comments.removeAll { gone($0.scene) }
         pageScenes.removeAll { gone($0) }
         if gone(sceneURL) { sceneURL = nil }
+    }
+
+    // MARK: Names a story tracks (issue #24)
+
+    /// A character (or place) and every name it goes by: the first is its main name, the rest
+    /// follow it when it changes (Mara Voss follows Mara).
+    struct NameGroup: Codable, Equatable, Identifiable {
+        var names: [String]
+        var id: String { names.first ?? "" }
+        var main: String { names.first ?? "" }
+    }
+
+    /// Each story's tracked names, read once. Not published: only the margin and the page's
+    /// hover look at them, and both are told by `objectWillChange` when they change.
+    private var nameCache: [URL: [NameGroup]] = [:]
+
+    private func namesURL(for book: URL) -> URL? {
+        guard let meta, let key = key(book) else { return nil }
+        return meta.appendingPathComponent("names/\(key).json")
+    }
+
+    /// The groups a story tracks, in the order they were added. A file of plain names (the
+    /// first form of this file) reads as one group each.
+    func nameGroups(of book: URL) -> [NameGroup] {
+        if let cached = nameCache[book] { return cached }
+        let data = namesURL(for: book).flatMap { try? Data(contentsOf: $0) }
+        let groups = data.flatMap { try? JSONDecoder().decode([NameGroup].self, from: $0) }
+            ?? data.flatMap { try? JSONDecoder().decode([String].self, from: $0) }?.map { NameGroup(names: [$0]) } ?? []
+        nameCache[book] = groups
+        return groups
+    }
+
+    /// Every name tracked, groups flattened, main names first in each.
+    func trackedNames(of book: URL) -> [String] { nameGroups(of: book).flatMap(\.names) }
+
+    /// The tracked names of the story the page is in.
+    var trackedNamesOnPage: [String] { bookURL.map(trackedNames(of:)) ?? [] }
+
+    func setNameGroups(_ groups: [NameGroup], of book: URL) {
+        let groups = groups.filter { !$0.names.isEmpty }
+        guard groups != nameGroups(of: book), let url = namesURL(for: book) else { return }
+        objectWillChange.send()
+        nameCache[book] = groups
+        if groups.isEmpty {
+            try? FileManager.default.removeItem(at: url)
+        } else {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted]
+            try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try? encoder.encode(groups).write(to: url, options: .atomic)
+        }
+        onFilesChanged()
+    }
+
+    /// Words typed or selected as names: separated by commas, tidied to one line each, none
+    /// already tracked.
+    private func newNames(_ text: String, in book: URL) -> [String] {
+        let known = Set(trackedNames(of: book))
+        var seen = known
+        return text.components(separatedBy: ",").compactMap { part in
+            let tidy = part.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }.joined(separator: " ")
+            guard !tidy.isEmpty, tidy.count <= 60, seen.insert(tidy).inserted else { return nil }
+            return tidy
+        }
+    }
+
+    /// Starts tracking a character. "Mara, Mara Voss, Ms. Voss" is one character with three
+    /// names, the first its main one.
+    @discardableResult
+    func trackName(_ text: String, in book: URL) -> Bool {
+        let names = newNames(text, in: book)
+        guard !names.isEmpty else { return false }
+        setNameGroups(nameGroups(of: book) + [NameGroup(names: names)], of: book)
+        return true
+    }
+
+    /// Another name for a character already tracked (comma-separated, as above).
+    @discardableResult
+    func addNames(_ text: String, toGroupOf main: String, in book: URL) -> Bool {
+        let names = newNames(text, in: book)
+        var groups = nameGroups(of: book)
+        guard !names.isEmpty, let index = groups.firstIndex(where: { $0.main == main }) else { return false }
+        groups[index].names += names
+        setNameGroups(groups, of: book)
+        return true
+    }
+
+    /// Takes one name out. A character's main name going hands that to the next; its last
+    /// name going stops tracking it.
+    func untrackName(_ name: String, in book: URL) {
+        setNameGroups(nameGroups(of: book).map { group in
+            NameGroup(names: group.names.filter { $0 != name })
+        }, of: book)
+    }
+
+    func untrackGroup(_ main: String, in book: URL) {
+        setNameGroups(nameGroups(of: book).filter { $0.main != main }, of: book)
+    }
+
+    /// A name was changed: it becomes the new one in its group, and when it was the main
+    /// name the others that contain it follow (Mara Voss becomes Maren Voss). A new name that
+    /// is already tracked just leaves the old one out.
+    func renameTracked(_ old: String, to new: String, in book: URL) {
+        var groups = nameGroups(of: book)
+        let taken = Set(groups.flatMap(\.names))
+        for index in groups.indices {
+            guard let place = groups[index].names.firstIndex(of: old) else { continue }
+            var names = groups[index].names
+            if taken.contains(new) {
+                names.remove(at: place)
+            } else {
+                names[place] = new
+                if place == 0 {
+                    for other in names.indices.dropFirst() {
+                        names[other] = NameMatch.replacing(old, with: new, in: names[other])
+                    }
+                }
+            }
+            groups[index].names = names
+        }
+        setNameGroups(groups, of: book)
+    }
+
+    /// A name was changed in a story's text: the rest of what the story keeps follows. Every
+    /// scene's comments (the words, the passage they quote, and where the passage now sits,
+    /// given how each scene's own text changed), the notes of scenes, chapters and the story,
+    /// the story's own notes folder, and every synopsis. `scenes` are the story's scenes with the
+    /// edits made to each one's text; `items` are every scene, chapter and the story itself.
+    func renameEverywhere(_ old: String, to new: String, scenes: [(url: URL, edits: [NameMatch.Edit])], items: [URL], book: URL) {
+        saveNow()
+        func change(_ text: String) -> String { NameMatch.replacing(old, with: new, in: text) }
+        for (scene, edits) in scenes {
+            var list = readComments(for: scene)
+            guard !list.isEmpty else { continue }
+            var changed = false
+            for index in list.indices {
+                var comment = list[index]
+                comment.text = change(comment.text)
+                comment.quote = change(comment.quote)
+                comment.prefix = change(comment.prefix)
+                comment.suffix = change(comment.suffix)
+                if !edits.isEmpty, comment.length > 0 {
+                    let start = NameMatch.map(comment.location, through: edits)
+                    let end = NameMatch.map(comment.location + comment.length, through: edits, end: true)
+                    comment.location = start
+                    comment.length = max(0, end - start)
+                }
+                if comment != list[index] { list[index] = comment; changed = true }
+            }
+            if changed { writeComments(list, for: scene) }
+        }
+        for item in items {
+            if let url = noteURL(for: item), FileManager.default.fileExists(atPath: url.path) {
+                let text = readText(url)
+                let new = change(text)
+                if new != text { write(new, to: url) }
+            }
+            var info = self.info(for: item)
+            if !info.synopsis.isEmpty {
+                let synopsis = change(info.synopsis)
+                if synopsis != info.synopsis { info.synopsis = synopsis; setInfo(info, for: item) }
+            }
+        }
+        let notes = (try? FileManager.default.contentsOfDirectory(at: Self.notesFolder(of: book), includingPropertiesForKeys: nil,
+                                                                   options: [.skipsHiddenFiles])) ?? []
+        for url in notes where url.pathExtension.lowercased() == "md" {
+            let text = readText(url)
+            let new = change(text)
+            if new != text { write(new, to: url) }
+        }
     }
 
     // MARK: Joining and splitting stories
@@ -1042,7 +1223,7 @@ final class MarginStore: ObservableObject {
     }
 
     /// Everything kept beside the manuscript in `.longhand/`, by folder and file extension.
-    private static let sidecars = [("comments", ".json"), ("notes", ".md"), ("scenes", ".json"), ("history", ""), ("covers", ".jpg"), ("covers", ".original.jpg")]
+    private static let sidecars = [("comments", ".json"), ("notes", ".md"), ("scenes", ".json"), ("history", ""), ("names", ".json"), ("covers", ".jpg"), ("covers", ".original.jpg")]
 
     // MARK: Book covers
 
@@ -1082,17 +1263,24 @@ final class MarginStore: ObservableObject {
 
     static let coverRatio = 1.6
 
+    /// The most a kept picture is: 2400 pixels on its longer side, enough to crop a full-size
+    /// cover from. Covers are shown small and travel through Git, so a phone photograph's
+    /// 6000 pixels would only be weight. (macOS can't write WebP; a plain JPEG at this size is
+    /// a few hundred kilobytes.)
+    static let keptPictureSide = 2400.0
+
     /// Sets a book's cover from an image file: the picture is kept whole (as a JPEG, at most
-    /// 4000 pixels on its longer side), and the cover is cropped to `unit` (or its middle
-    /// in the Kindle shape 1:1.6 when nil).
+    /// `keptPictureSide` pixels on its longer side), and the cover is cropped to `unit` (or its
+    /// middle in the Kindle shape 1:1.6 when nil).
     @discardableResult
     func setCover(of book: URL, from file: URL, cropTo unit: CGRect? = nil) -> Bool {
         guard let source = NSImage(contentsOf: file), let original = coverOriginalURL(for: book),
               let cg = source.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return false }
         let longest = max(cg.width, cg.height)
-        let scale = min(1, 4000 / Double(longest))
+        let scale = min(1, Self.keptPictureSide / Double(longest))
         guard let whole = Self.jpeg(cg, in: CGRect(x: 0, y: 0, width: cg.width, height: cg.height),
-                                    width: Int(Double(cg.width) * scale), height: Int(Double(cg.height) * scale)) else { return false }
+                                    width: Int(Double(cg.width) * scale), height: Int(Double(cg.height) * scale),
+                                    quality: 0.8) else { return false }
         try? FileManager.default.createDirectory(at: original.deletingLastPathComponent(), withIntermediateDirectories: true)
         guard (try? whole.write(to: original, options: .atomic)) != nil else { return false }
         return cropCover(of: book, to: unit)
@@ -1128,7 +1316,7 @@ final class MarginStore: ObservableObject {
     }
 
     /// Part of a picture, scaled to a size, as JPEG data.
-    private static func jpeg(_ image: CGImage, in crop: CGRect, width: Int, height: Int) -> Data? {
+    private static func jpeg(_ image: CGImage, in crop: CGRect, width: Int, height: Int, quality: Double = 0.85) -> Data? {
         guard width > 0, height > 0, let cropped = image.cropping(to: crop),
               let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
                                       space: CGColorSpace(name: CGColorSpace.sRGB)!,
@@ -1136,14 +1324,14 @@ final class MarginStore: ObservableObject {
         context.interpolationQuality = .high
         context.draw(cropped, in: CGRect(x: 0, y: 0, width: width, height: height))
         guard let scaled = context.makeImage() else { return nil }
-        return NSBitmapImageRep(cgImage: scaled).representation(using: .jpeg, properties: [.compressionFactor: 0.88])
+        return NSBitmapImageRep(cgImage: scaled).representation(using: .jpeg, properties: [.compressionFactor: quality])
     }
 
     func removeCover(of book: URL) {
         guard let url = coverURL(for: book) else { return }
-        try? FileManager.default.trashItem(at: url, resultingItemURL: nil)
+        Discard.bookkeeping(url)
         if let original = coverOriginalURL(for: book), FileManager.default.fileExists(atPath: original.path) {
-            try? FileManager.default.trashItem(at: original, resultingItemURL: nil)
+            try? Discard.toTrash(original)
         }
         coverCache[book] = nil
         coverVersion += 1

@@ -230,6 +230,7 @@ struct QuickOpen: View {
             command("Find and Replace…", "⌥⌘F") { Commands.showReplace(in: store.margin) },
             command("Find in Library…", "⇧⌘F", greets: store.openBook == nil) { store.searchShown = true },
             command("Comment on Selection", "⌘J", greets: writing) { Commands.comment(margin: store.margin) },
+            command("Track Name", "⇧⌘J") { Commands.trackName(store: store) },
             command("Go to Contents", "⌥⌘1") { Panes.focus(.contents, in: store) },
             command("Go to Margin", "⌥⌘2") { Panes.focus(.margin, in: store) },
             command("Go to Page", "⌥⌘3") { Panes.focus(.page, in: store) },

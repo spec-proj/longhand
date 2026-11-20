@@ -38,7 +38,7 @@ enum SceneVersions {
 
     /// What Longhand writes for its own automatic commits (never versions).
     static let automaticPrefixes = [
-        "Writing session", "Switched from", "Before restoring", "Restored ", "Before starting the rewrite",
+        "Writing session", "Switched from", "Before restoring", "Before changing ", "Restored ", "Before starting the rewrite",
         "Before keeping the rewrite", "Last of the rewrite", "Kept the rewrite", "Merge", "Auto-commit",
     ]
 

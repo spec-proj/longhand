@@ -59,6 +59,7 @@ struct BookInfoPage: View {
                     standing
                 }
                 chapters
+                if store.openBook == nil { LinkedStories(book: book, editing: isEditing, margin: margin) }
             }
             .font(.system(size: Layout.chromeSize))
             .foregroundStyle(Color(PaperTheme.ink))
@@ -88,6 +89,15 @@ struct BookInfoPage: View {
         .buttonStyle(FramedButtonStyle())
         .fontWeight(isEditing ? .semibold : .medium)
         .help(isEditing ? "Back to the story's page" : "Change the story's details")
+    }
+
+    /// Pins the story to the top of the Library as a cover, or takes it off again.
+    private var pinButton: some View {
+        let pinned = margin.isPinned(book.url)
+        return Button(pinned ? "Unpin" : "Pin") { margin.setPinned(!pinned, for: book.url) }
+            .buttonStyle(FramedButtonStyle())
+            .fontWeight(.medium)
+            .help(pinned ? "Take it off the top of the Library" : "Keep it at the top of the Library")
     }
 
     /// Goes into the story, as a double-click on its row does. Only in the Library: inside a
@@ -121,12 +131,12 @@ struct BookInfoPage: View {
                     .foregroundStyle(Color(PaperTheme.ink))
                     .fixedSize(horizontal: false, vertical: true)
                     .textSelection(.enabled)
-                    .padding(.trailing, store.openBook == nil ? 140 : 80)
+                    .padding(.trailing, store.openBook == nil ? 210 : 80)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.bottom, 2)
                     .overlay(alignment: .topTrailing) {
                         HStack(spacing: 6) {
-                            if store.openBook == nil { openButton }
+                            if store.openBook == nil { pinButton; openButton }
                             editButton
                         }
                         .padding(.top, 6)
@@ -255,7 +265,7 @@ struct BookInfoPage: View {
                     FormMenu(form: info.form, collection: info.collection,
                              setCollection: { value in update { $0.collection = value } }) { form in update { $0.form = form } }
                 }
-                labelled("Genre") {
+                labelled(Genres.label(for: info.form)) {
                     GenreMenu(genre: info.genre, form: info.form) { value in update { $0.genre = value } }
                 }
                 labelled("Show") {
@@ -396,15 +406,32 @@ struct BookInfoPage: View {
     // MARK: Chapters
 
     private var chapters: some View {
+        let kind = ContentsKind.of(form: info.form, shape: book.shape)
+        return Group {
+            switch kind {
+            case .poem, .headings:
+                if let document = book.document { DocumentContents(kind: kind, document: document) }
+            case .poems, .chapters:
+                contentsList(poems: kind == .poems)
+            }
+        }
+    }
+
+    /// The contents as a printed book sets them: a line for each chapter, or for each poem
+    /// of a book of poems, with a dotted leader to the page it starts on.
+    private func contentsList(poems: Bool) -> some View {
         let hide = info.hideChapterNumbers == true
-        // A one-document story (a screenplay, a poem): its one line is the document itself,
-        // so it has no chapter number.
+        // A one-document story (a screenplay): its one line is the document itself, so it
+        // has no chapter number.
         let oneDocument = book.shape == .document
+        let scenes = book.looseScenes
+        let counts = poems ? scenes.map { store.wordCount(of: $0) } : book.chapters.map { store.wordCount(of: $0) }
+        let starts = Estimate.startPages(counts)
         return VStack(alignment: .leading, spacing: 8) {
             HStack {
-                sectionTitle("Contents")
+                ContentsTitle()
                 Spacer()
-                if isEditing {
+                if isEditing && !poems {
                 SquareCheckbox(title: "Numbers", isOn: Binding(get: { !hide }, set: { on in update { $0.hideChapterNumbers = on ? nil : true } }))
                     .font(.system(size: Layout.detailSize))
                     .help("Show \(store.names(of: book.url).chapter.lowercased()) numbers here and in the contents")
@@ -412,21 +439,34 @@ struct BookInfoPage: View {
             }
             // Set like a printed book's contents (owner, 2026-11-13): no box or rules, the
             // title in the book’s face, a dotted leader to the page it starts on.
-            let starts = Estimate.startPages(book.chapters.map { store.wordCount(of: $0) })
             VStack(spacing: 2) {
-                ForEach(Array(book.chapters.enumerated()), id: \.element.id) { index, chapter in
-                    ChapterLine(number: (hide || oneDocument) ? nil : index + 1, title: chapter.title, page: starts[index],
-                                words: store.wordCount(of: chapter), status: margin.info(for: chapter.url).status) {
-                        // The story's own chapter (a one-document story): the document opens.
-                        store.selection = oneDocument
-                            ? .scene(book.document?.url ?? chapter.url)
-                            : .chapter(chapter.url)
+                if poems {
+                    ForEach(Array(scenes.enumerated()), id: \.element.id) { index, scene in
+                        ChapterLine(number: nil, title: scene.title, page: starts[index], words: counts[index],
+                                    status: margin.info(for: scene.url).status) {
+                            store.selection = .scene(scene.url)
+                        }
                     }
-                }
-                if book.chapters.isEmpty {
-                    Text("No \(store.names(of: book.url).chapters.lowercased()) yet")
-                        .foregroundStyle(Color(PaperTheme.secondary))
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    if scenes.isEmpty {
+                        Text("Nothing here yet")
+                            .foregroundStyle(Color(PaperTheme.secondary))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                } else {
+                    ForEach(Array(book.chapters.enumerated()), id: \.element.id) { index, chapter in
+                        ChapterLine(number: (hide || oneDocument) ? nil : index + 1, title: chapter.title, page: starts[index],
+                                    words: counts[index], status: margin.info(for: chapter.url).status) {
+                            // The story's own chapter (a one-document story): the document opens.
+                            store.selection = oneDocument
+                                ? .scene(book.document?.url ?? chapter.url)
+                                : .chapter(chapter.url)
+                        }
+                    }
+                    if book.chapters.isEmpty {
+                        Text("No \(store.names(of: book.url).chapters.lowercased()) yet")
+                            .foregroundStyle(Color(PaperTheme.secondary))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
                 }
             }
             .padding(.horizontal, -8)
@@ -695,19 +735,22 @@ struct CoverCropSheet: View {
 
 /// A chapter on the story's page, as a book's contents sets it: number (unless hidden),
 /// title, a dotted leader, its status and the page it starts on (owner, 2026-11-13).
-private struct ChapterLine: View {
+struct ChapterLine: View {
     let number: Int?
     let title: String
     /// The page it starts on, estimated (each chapter on a fresh page).
     let page: Int
     let words: Int
     let status: SceneInfo.Status?
+    /// How far a heading's level sets it in from the left.
+    var indent: CGFloat = 0
     let action: () -> Void
     @State private var hovering = false
 
     var body: some View {
         Button(action: action) {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
+                if indent > 0 { Spacer().frame(width: indent) }
                 if let number {
                     Text("\(number)")
                         .font(.system(size: Layout.blurbSize, design: .serif).monospacedDigit())
@@ -822,46 +865,6 @@ enum Estimate {
     }
 }
 
-/// The genres offered in the Genre menu. Movies and books use different lists: a screenplay
-/// gets the film industry's genres, everything else the book trade's.
-enum Genres {
-    /// BISAC's fiction headings (Book Industry Study Group, the book trade's standard:
-    /// bisg.org/fiction, 2025): its 70 headings plus the 18 that it uses only as parents of
-    /// sub-headings (Fantasy, Romance, Thrillers …).
-    static let book: [String] = [
-        "Absurdist", "Action & Adventure", "Adaptations & Pastiche", "African American & Black",
-        "Alternative History", "Amish & Mennonite", "Animals", "Anthologies (multiple authors)",
-        "Asian American & Pacific Islander", "Biographical & Autofiction", "Books, Bookstores & Libraries",
-        "Buddhist", "Christian", "Classics", "Coming of Age", "Cozy", "Crime", "Cultural Heritage",
-        "Death, Grief, Bereavement", "Disability", "Disaster", "Diversity & Multicultural", "Dystopian",
-        "Epistolary (Letters, Diaries, etc.)", "Erotica", "Fairy Tales, Folk Tales, Legends & Mythology",
-        "Family Life", "Fantasy", "Feminist", "Friendship", "Ghost", "Gothic", "Hispanic & Latino",
-        "Historical", "Holidays", "Horror", "Humorous", "Immigration & Emigration", "Indigenous",
-        "Indigenous Peoples of Turtle Island", "Jewish", "Legal", "LGBTQ+", "Literary",
-        "LitRPG (Literary Role-Playing Game)", "Magical Realism", "Mashups", "Media Tie-In", "Medical",
-        "Middle Eastern & Arab American", "Multiple Timelines", "Muslim", "Mystery & Detective",
-        "Native American", "Nature & the Environment", "Neurodiversity", "Noir", "Occult & Supernatural",
-        "Own Voices", "Performing Arts", "Places", "Political", "Prejudice, Racism & Colorism", "Psychological",
-        "Religious", "Romance", "Sagas", "Satire", "School & Education", "Science Fiction", "Sea Stories",
-        "Short Stories (single author)", "Small Town & Rural", "Southern", "Speculative", "Sports",
-        "Suburban", "Superheroes", "Surrealism", "Thrillers", "Time Travel", "Travel & Vacation",
-        "Urban & Street Lit", "Visionary & Metaphysical", "War & Military", "Westerns", "Women",
-        "World Literature",
-    ]
-
-    /// The film industry's movie genres (TMDB's public list, themoviedb.org, 2026).
-    static let screenplay: [String] = [
-        "Action", "Adventure", "Animation", "Comedy", "Crime", "Documentary", "Drama",
-        "Family", "Fantasy", "History", "Horror", "Music", "Mystery", "Romance",
-        "Science Fiction", "TV Movie", "Thriller", "War", "Western",
-    ]
-
-    /// The list for a form: a screenplay's movies, otherwise the book trade's.
-    static func all(for form: BookForm?) -> [String] {
-        form == .screenplay ? screenplay : book
-    }
-}
-
 /// The genre as a menu (a framed button like a pop-up); None clears it.
 /// The story's form (Novel, Novella, Short Story, Poetry…) as a menu, and for a form that can
 /// be one piece or several, Collection.
@@ -937,6 +940,6 @@ struct GenreMenu: View {
         .buttonStyle(.plain)
         .menuIndicator(.hidden)
         .fixedSize()
-        .help(form == .screenplay ? "The film industry’s standard movie genres" : "The book trade’s standard fiction genres")
+        .help(Genres.source(for: form))
     }
 }

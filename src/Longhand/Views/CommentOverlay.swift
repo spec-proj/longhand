@@ -45,6 +45,8 @@ final class CommentOverlay {
 
     func refresh() {
         guard let textView else { return }
+        let names = margin.trackedNamesOnPage
+        if textView.trackedNames != names { textView.trackedNames = names }
         let shown = visible()
         let signature = shown.map {
             "\($0.comment.id)|\($0.range.location)|\($0.range.length)|\($0.comment.id == margin.focused)"
@@ -278,6 +280,78 @@ final class HighlightTextView: NSTextView {
         }
     }
 
+    // MARK: Tracked names (issue #24)
+
+    /// The names the story tracks. One shows a dotted line while the pointer is over it.
+    var trackedNames: [String] = [] {
+        didSet {
+            guard trackedNames != oldValue else { return }
+            nameRegexes = trackedNames.compactMap(NameMatch.regex(for:))
+            setHoveredName(nil)
+        }
+    }
+    private var nameRegexes: [NSRegularExpression] = []
+    private var hoveredName: NSRange?
+    private var hoveredIndex = -1
+    private var nameTracking: NSTrackingArea?
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let nameTracking { removeTrackingArea(nameTracking) }
+        let area = NSTrackingArea(rect: .zero, options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+                                  owner: self, userInfo: nil)
+        addTrackingArea(area)
+        nameTracking = area
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        super.mouseMoved(with: event)
+        guard !nameRegexes.isEmpty, let window else { return }
+        let screen = window.convertPoint(toScreen: event.locationInWindow)
+        let index = characterIndex(for: screen)
+        guard index != hoveredIndex else { return }
+        hoveredIndex = index
+        guard index != NSNotFound, let range = NameMatch.range(at: index, in: string as NSString, among: nameRegexes) else {
+            setHoveredName(nil)
+            return
+        }
+        // Only when the pointer is on the name itself, not on the empty end of its line.
+        let point = convert(event.locationInWindow, from: nil)
+        setHoveredName(lineRects(of: range).contains { $0.insetBy(dx: -2, dy: 0).contains(point) } ? range : nil)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        super.mouseExited(with: event)
+        hoveredIndex = -1
+        setHoveredName(nil)
+    }
+
+    private func setHoveredName(_ range: NSRange?) {
+        guard range != hoveredName else { return }
+        for old in [hoveredName, range] {
+            if let old { setNeedsDisplay(bounds(of: old).insetBy(dx: -4, dy: -4)) }
+        }
+        hoveredName = range
+    }
+
+    /// A dotted line under the tracked name the pointer is over.
+    private func drawHoveredName(in rect: NSRect) {
+        guard let range = hoveredName, NSMaxRange(range) <= (string as NSString).length else { return }
+        PaperTheme.secondary.setStroke()
+        for line in lineRects(of: range) {
+            let trim = max(0, (line.height - Layout.textSize * 1.3) / 2)
+            let y = line.maxY - trim - 1
+            guard line.insetBy(dx: -2, dy: -4).intersects(rect) else { continue }
+            let path = NSBezierPath()
+            path.move(to: NSPoint(x: line.minX, y: y))
+            path.line(to: NSPoint(x: line.maxX, y: y))
+            path.lineWidth = 1.4
+            path.lineCapStyle = .round
+            path.setLineDash([0.1, 3], count: 2, phase: 0)
+            path.stroke()
+        }
+    }
+
     override func mouseDown(with event: NSEvent) {
         if let onChangeBarClicked, !changeBars.isEmpty, PageMarks.changeBarsShown {
             let point = convert(event.locationInWindow, from: nil)
@@ -305,6 +379,7 @@ final class HighlightTextView: NSTextView {
                 if box.intersects(rect) { NSBezierPath(rect: box).fill() }
             }
         }
+        drawHoveredName(in: rect)
         if PageMarks.changeBarsShown { drawChangeBars(in: rect) }
     }
 }

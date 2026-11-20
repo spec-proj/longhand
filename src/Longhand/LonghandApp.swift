@@ -191,6 +191,8 @@ struct LonghandApp: App {
                 Divider()
                 Button("Comment on Selection") { Commands.comment(margin: store.margin) }
                     .keyboardShortcut("j", modifiers: .command)
+                Button("Track Name") { Commands.trackName(store: store) }
+                    .keyboardShortcut("j", modifiers: [.command, .shift])
             }
             CommandGroup(replacing: .sidebar) {
                 Button(showSidebar ? "Hide Contents" : "Show Contents") { showSidebar.toggle() }

@@ -42,6 +42,7 @@ struct CheatSheet: View {
         Shortcut(label: "Bold", keys: [.symbol("command"), .letter("B")]),
         Shortcut(label: "Italic", keys: [.symbol("command"), .letter("I")]),
         Shortcut(label: "Comment", keys: [.symbol("command"), .letter("J")]),
+        Shortcut(label: "Track name", keys: [.symbol("shift"), .symbol("command"), .letter("J")]),
         Shortcut(label: "New scene", keys: [.symbol("command"), .letter("N")]),
         Shortcut(label: "New chapter", keys: [.symbol("shift"), .symbol("command"), .letter("N")]),
         Shortcut(label: "Commit", keys: [.symbol("shift"), .symbol("command"), .letter("S")]),

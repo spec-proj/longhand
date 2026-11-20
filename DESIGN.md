@@ -622,6 +622,7 @@ CodeEdit, CotEditor, NetNewsWire, Ice and MarkEdit). No half points; no words un
 | Detail | Callout | 12 Regular; Medium for one-line grey labels | dates, chapter names, words, counts, badges |
 | Prose | SF Pro (or New York) | 17pt / 1.65 | the page |
 | Opener | the prose face | 32pt | chapter and book titles |
+| Contents title | New York, Semibold | 22 | "Contents" on a story's page, set as a printed book's (owner, 2026-11-20); the other section titles stay Headline |
 
 Weights carry hierarchy, not size: Regular to read, Medium for what you click and for short
 grey labels (grey Regular at 12pt reads faint), Semibold for the chosen thing, Bold only in
