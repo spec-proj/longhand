@@ -49,7 +49,8 @@ struct NamesPane: View {
         .onReceive(store.versions.changes.$generation) { _ in tick += 1 }
         .task(id: Recount(groups: groups, tick: tick)) {
             guard let book, !groups.isEmpty else { counts = [:]; return }
-            counts = await store.occurrences(ofGroups: groups.map(\.names), in: book)
+            let found = await store.occurrences(ofGroups: groups.map(\.names), in: book)
+            if !Task.isCancelled { counts = found }
         }
         .sheet(item: Binding(get: { renaming.map(Renaming.init) }, set: { renaming = $0?.name })) { target in
             if let book {

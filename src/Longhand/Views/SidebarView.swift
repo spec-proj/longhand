@@ -156,7 +156,7 @@ struct SidebarView: View {
                                     pinnedStrip(pinned)
                                 }
                                 ForEach(library.folders) { folder in
-                                    folderRow(folder, count: library.books(in: folder.url).count)
+                                    folderRow(folder, count: library.books(in: folder.url).filter { looks[$0.url]?.pinned != true }.count)
                                     if !collapsedFolders.contains(folder.url) {
                                         ForEach(library.books(in: folder.url).filter { looks[$0.url]?.pinned != true }) { book in
                                             libraryRow(book).padding(.leading, 14)
@@ -522,7 +522,12 @@ struct SidebarView: View {
     private var visibleRows: [Selection] {
         guard let library = store.library else { return [] }
         guard let book = openBook(in: library) else {
-            return library.books.filter { $0.folder.map { !collapsedFolders.contains($0) } ?? true }.map { .book($0.url) }
+            // Pinned stories are drawn first, whatever folder they are in.
+            let pinned = library.books.filter { looks[$0.url]?.pinned == true }
+            let rest = library.books.filter {
+                looks[$0.url]?.pinned != true && ($0.folder.map { !collapsedFolders.contains($0) } ?? true)
+            }
+            return (pinned + rest).map { .book($0.url) }
         }
         if store.contentsTab == .boneyard {
             return book.boneyardChapters.flatMap(\.scenes).map { .scene($0.url) }

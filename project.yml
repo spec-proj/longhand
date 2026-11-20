@@ -16,8 +16,8 @@ settings:
     ENABLE_HARDENED_RUNTIME: NO
     ENABLE_APP_SANDBOX: NO
     DEVELOPMENT_TEAM: ""
-    MARKETING_VERSION: "0.9.94"
-    CURRENT_PROJECT_VERSION: "15"
+    MARKETING_VERSION: "0.9.95"
+    CURRENT_PROJECT_VERSION: "16"
     # Smaller app (2026-11-14): unused code left out, and the release build stripped of the
     # symbols only a debugger needs (they stay in the .dSYM beside the build).
     DEAD_CODE_STRIPPING: YES
@@ -35,8 +35,20 @@ targets:
     platform: macOS
     sources:
       - path: src/Longhand
+      # Google's WebP encoder (third_party/LIBWEBP.md): macOS reads WebP but can't write it.
+      # Other processors' files are left out; the Intel slice gets SSE4.1 throughout.
+      - path: third_party/libwebp
+        excludes:
+          - "**/*mips*"
+          - "**/*msa*"
+          - "**/*avx2*"
+          - COPYING
+          - PATENTS
+        compilerFlags: ["-w", "-Xarch_x86_64", "-msse4.1"]
     settings:
       base:
+        HEADER_SEARCH_PATHS: "$(SRCROOT)/third_party/libwebp"
+        SWIFT_OBJC_BRIDGING_HEADER: "$(SRCROOT)/src/Longhand/Longhand-Bridging-Header.h"
         PRODUCT_BUNDLE_IDENTIFIER: com.specproj.longhand
         PRODUCT_NAME: Longhand
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon

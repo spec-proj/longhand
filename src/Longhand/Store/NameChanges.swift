@@ -33,14 +33,21 @@ extension LibraryStore {
         guard let root = libraryURL, !oldName.isEmpty, !newName.isEmpty, oldName != newName else { done(false); return (0, 0) }
         saveNow()
         let all = scenes(of: book)
-        let edits = all.map { scene -> (url: URL, edits: [NameMatch.Edit], text: String) in
-            let text = String.prose(at: scene.url) ?? ""
-            return (scene.url, NameMatch.edits(replacing: oldName, with: newName, in: text), text)
+        func plan() -> [(url: URL, edits: [NameMatch.Edit], text: String)] {
+            all.map { scene in
+                let text = String.prose(at: scene.url) ?? ""
+                return (scene.url, NameMatch.edits(replacing: oldName, with: newName, in: text), text)
+            }
         }
-        let changed = edits.filter { !$0.edits.isEmpty }
         let message = "\(oldName) was changed to \(newName)"
+        let preview = plan().filter { !$0.edits.isEmpty }
 
         versions.record("Before changing \(oldName) to \(newName)") { [self] _ in
+            // What was typed while the first commit ran is saved and read again, so the change
+            // is made to the text as it is now, never to the text as it was.
+            saveNow()
+            let edits = plan()
+            let changed = edits.filter { !$0.edits.isEmpty }
             for scene in changed {
                 try? NameMatch.apply(scene.edits, to: scene.text).write(to: scene.url, atomically: true, encoding: .utf8)
             }
@@ -55,6 +62,6 @@ extension LibraryStore {
                 versions.saveVersions(of: paths, note: message, done: done)
             }
         }
-        return (changed.reduce(0) { $0 + $1.edits.count }, changed.count)
+        return (preview.reduce(0) { $0 + $1.edits.count }, preview.count)
     }
 }

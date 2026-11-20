@@ -63,7 +63,9 @@ enum Commands {
         if range.length == 0 {
             range = page.selectionRange(forProposedRange: range, granularity: .selectByWord)
         }
-        let name = (page.string as NSString).substring(with: range).trimmingCharacters(in: .whitespacesAndNewlines)
+        // A comma in the text is part of the name here (in the Names tab it separates names).
+        let name = (page.string as NSString).substring(with: range).replacingOccurrences(of: ",", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
         let defaults = UserDefaults.standard
         defaults.set(true, forKey: "showMargin")
         defaults.set(MarginStore.Tab.names.rawValue, forKey: "marginTab")

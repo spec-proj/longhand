@@ -31,7 +31,8 @@ extension MarginStore {
     func renameLinks(from old: String, to new: String) {
         for (book, info) in infos where info.links?.contains(old) == true {
             var changed = info
-            changed.links = info.links?.map { $0 == old ? new : $0 }
+            var seen = Set<String>()
+            changed.links = info.links?.map { $0 == old ? new : $0 }.filter { seen.insert($0).inserted }
             setInfo(changed, for: book)
         }
     }

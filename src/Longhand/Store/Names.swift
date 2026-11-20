@@ -13,15 +13,16 @@ enum NameMatch {
     }
 
     /// A word character: a letter, a digit, or an underscore.
-    private static let word = "\\p{L}\\p{N}_"
+    private static let word = "\\p{L}\\p{M}\\p{N}_"
 
     static func regex(for name: String) -> NSRegularExpression? {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
-        // Each word on its own, with any run of spaces between: "Mara  Voss" is "Mara Voss".
+        // Each word on its own, with any run of spaces between (never a line break, so a
+        // heading "Mara" over a paragraph "Voss…" is not "Mara Voss"): "Mara  Voss" is "Mara Voss".
         func pattern(_ text: String) -> String {
             text.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }
-                .map { NSRegularExpression.escapedPattern(for: $0) }.joined(separator: "\\s+")
+                .map { NSRegularExpression.escapedPattern(for: $0) }.joined(separator: "\\h+")
         }
         let forms = Array(Set([trimmed, trimmed.uppercased()]))
         let any = forms.map(pattern).joined(separator: "|")

@@ -1778,6 +1778,8 @@ enum SelfTest {
                   "names: a change keeps possessives, and capitals stay capitals")
             check(NameMatch.replacing("Mara Voss", with: "Maren Ode", in: "Mara  Voss and Mara Vossen") == "Maren Ode and Mara Vossen",
                   "names: a name of two words matches across spacing, and only as a whole")
+            check(NameMatch.ranges(of: "Mara Voss", in: "Mara\n\nVoss said so. Mara Voss left.").count == 1,
+                  "names: two words are never joined across a line break (a heading, then a paragraph)")
             let edits = NameMatch.edits(replacing: "Mara", with: "Marguerite", in: "Mara and Mara")
             check(NameMatch.map(0, through: edits) == 0 && NameMatch.map(5, through: edits) == 5 + 6
                   && NameMatch.map(13, through: edits, end: true) == 13 + 12 && NameMatch.map(2, through: edits) == 0,
@@ -2973,6 +2975,24 @@ enum SelfTest {
                 let cut = store.margin.cover(of: book.url)?.cgImage(forProposedRect: nil, context: nil, hints: nil)
                 check(kept?.width == 2400 && kept?.height == 1600, "cover: a large picture is kept at 2400 pixels on its longer side")
                 check((cut?.width ?? 9999) <= 1600, "cover: the cover itself is never wider than 1600 pixels")
+                let coverFile = store.margin.coverURL(for: book.url)
+                let magic = coverFile.flatMap { try? Data(contentsOf: $0) }.map { Array($0.prefix(12)) } ?? []
+                check(coverFile?.pathExtension == "webp" && magic.count == 12 && Array(magic[0..<4]) == Array("RIFF".utf8) && Array(magic[8..<12]) == Array("WEBP".utf8),
+                      "cover: a new cover is saved as WebP")
+                let originalFile = store.margin.coverOriginalURL(for: book.url)
+                check(originalFile?.pathExtension == "webp" && (originalFile.flatMap { try? Data(contentsOf: $0) }?.count ?? Int.max) < 600_000,
+                      "cover: the kept picture is WebP too, and small")
+                // A cover made before WebP is still read, and is replaced when the cover is cut again.
+                if let webp = coverFile, let image = store.margin.cover(of: book.url),
+                   let jpeg = image.tiffRepresentation.flatMap({ NSBitmapImageRep(data: $0) })?.representation(using: .jpeg, properties: [:]) {
+                    let old = webp.deletingPathExtension().appendingPathExtension("jpg")
+                    try? fm.removeItem(at: webp)
+                    try? jpeg.write(to: old)
+                    check(store.margin.coverURL(for: book.url) == old, "cover: a cover from before WebP is still the cover")
+                    store.margin.cropCover(of: book.url, to: nil)
+                    check(!fm.fileExists(atPath: old.path) && store.margin.coverURL(for: book.url)?.pathExtension == "webp",
+                          "cover: cutting it again saves WebP and takes the old JPEG away")
+                }
                 store.margin.removeCover(of: book.url)
                 try? fm.removeItem(at: big)
             }

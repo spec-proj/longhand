@@ -928,6 +928,7 @@ final class MarginStore: ObservableObject {
         saveNow()
         coverCache = [:]
         guard let meta else { return }
+        nameCache = [:]
         let fm = FileManager.default
         var staged: [(temp: URL, destination: URL)] = []
         for move in moves {
@@ -979,12 +980,17 @@ final class MarginStore: ObservableObject {
     func trash(_ item: URL) {
         saveNow()
         coverCache = [:]
+        nameCache = [:]
         guard let meta, let key = key(item) else { return }
         let fm = FileManager.default
         for (folder, ext) in Self.sidecars {
             for path in [key + ext, key] {
                 let url = meta.appendingPathComponent("\(folder)/\(path)")
-                if fm.fileExists(atPath: url.path) { Discard.bookkeeping(url) }
+                guard fm.fileExists(atPath: url.path) else { continue }
+                // What the writer wrote and Git may not have yet (notes, and the autosaved
+                // copies of a scene, which Git never sees) can be put back from the Trash; the
+                // rest is bookkeeping that Git keeps.
+                if folder == "notes" || folder == "history" { try? Discard.toTrash(url) } else { Discard.bookkeeping(url) }
             }
         }
         objectWillChange.send()
@@ -1223,7 +1229,7 @@ final class MarginStore: ObservableObject {
     }
 
     /// Everything kept beside the manuscript in `.longhand/`, by folder and file extension.
-    private static let sidecars = [("comments", ".json"), ("notes", ".md"), ("scenes", ".json"), ("history", ""), ("names", ".json"), ("covers", ".jpg"), ("covers", ".original.jpg")]
+    private static let sidecars = [("comments", ".json"), ("notes", ".md"), ("scenes", ".json"), ("history", ""), ("names", ".json"), ("covers", ".webp"), ("covers", ".original.webp"), ("covers", ".jpg"), ("covers", ".original.jpg")]
 
     // MARK: Book covers
 
@@ -1236,10 +1242,24 @@ final class MarginStore: ObservableObject {
     /// files move, go to the Trash or are re-read, so a cover never sticks to an old path.
     private var coverCache: [URL: NSImage?] = [:]
 
-    /// `.longhand/covers/<Book>.jpg`: kept beside the book's other details, moved with it.
-    func coverURL(for book: URL) -> URL? {
+    /// `.longhand/covers/<Book>.webp`: kept beside the book's other details, moved with it.
+    /// A cover made before WebP (0.9.94) is a `.jpg` there, and is read as it is until the
+    /// cover is cut again. The file that exists is the one returned; for a new cover, the
+    /// `.webp` it will be.
+    func coverURL(for book: URL) -> URL? { coverFile(book, original: false) }
+
+    private func coverFile(_ book: URL, original: Bool) -> URL? {
         guard let meta, let key = key(book) else { return nil }
-        return meta.appendingPathComponent("covers/\(key).jpg")
+        let name = original ? "\(key).original" : key
+        let webp = meta.appendingPathComponent("covers/\(name).webp")
+        let jpeg = meta.appendingPathComponent("covers/\(name).jpg")
+        let fm = FileManager.default
+        return !fm.fileExists(atPath: webp.path) && fm.fileExists(atPath: jpeg.path) ? jpeg : webp
+    }
+
+    /// The older JPEG beside a WebP being written, to be removed once the WebP is there.
+    private func staleJPEG(beside file: URL) -> URL? {
+        file.pathExtension == "webp" ? file.deletingPathExtension().appendingPathExtension("jpg") : nil
     }
 
     func cover(of book: URL) -> NSImage? {
@@ -1250,10 +1270,7 @@ final class MarginStore: ObservableObject {
     }
 
     /// The picture a cover was made from, kept whole so it can be cropped again.
-    func coverOriginalURL(for book: URL) -> URL? {
-        guard let meta, let key = key(book) else { return nil }
-        return meta.appendingPathComponent("covers/\(key).original.jpg")
-    }
+    func coverOriginalURL(for book: URL) -> URL? { coverFile(book, original: true) }
 
     /// What Crop Cover works from: the original picture, or the cover itself for one set
     /// before originals were kept.
@@ -1269,20 +1286,27 @@ final class MarginStore: ObservableObject {
     /// a few hundred kilobytes.)
     static let keptPictureSide = 2400.0
 
-    /// Sets a book's cover from an image file: the picture is kept whole (as a JPEG, at most
+    /// Where a new cover or its picture is written: always WebP.
+    private func newCoverFile(_ book: URL, original: Bool) -> URL? {
+        guard let meta, let key = key(book) else { return nil }
+        return meta.appendingPathComponent("covers/\(key)\(original ? ".original" : "").webp")
+    }
+
+    /// Sets a book's cover from an image file: the picture is kept whole (as WebP, at most
     /// `keptPictureSide` pixels on its longer side), and the cover is cropped to `unit` (or its
     /// middle in the Kindle shape 1:1.6 when nil).
     @discardableResult
     func setCover(of book: URL, from file: URL, cropTo unit: CGRect? = nil) -> Bool {
-        guard let source = NSImage(contentsOf: file), let original = coverOriginalURL(for: book),
+        guard let source = NSImage(contentsOf: file), let original = newCoverFile(book, original: true),
               let cg = source.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return false }
         let longest = max(cg.width, cg.height)
         let scale = min(1, Self.keptPictureSide / Double(longest))
-        guard let whole = Self.jpeg(cg, in: CGRect(x: 0, y: 0, width: cg.width, height: cg.height),
+        guard let whole = Self.webp(cg, in: CGRect(x: 0, y: 0, width: cg.width, height: cg.height),
                                     width: Int(Double(cg.width) * scale), height: Int(Double(cg.height) * scale),
-                                    quality: 0.8) else { return false }
+                                    quality: 80) else { return false }
         try? FileManager.default.createDirectory(at: original.deletingLastPathComponent(), withIntermediateDirectories: true)
         guard (try? whole.write(to: original, options: .atomic)) != nil else { return false }
+        staleJPEG(beside: original).map { if FileManager.default.fileExists(atPath: $0.path) { Discard.bookkeeping($0) } }
         return cropCover(of: book, to: unit)
     }
 
@@ -1290,7 +1314,7 @@ final class MarginStore: ObservableObject {
     /// picture (origin at the top left); nil is the largest 1:1.6 rectangle in the middle.
     @discardableResult
     func cropCover(of book: URL, to unit: CGRect?) -> Bool {
-        guard let destination = coverURL(for: book), let source = coverSource(of: book),
+        guard let destination = newCoverFile(book, original: false), let source = coverSource(of: book),
               let cg = source.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return false }
         let ratio = Self.coverRatio
         let width = CGFloat(cg.width), height = CGFloat(cg.height)
@@ -1306,32 +1330,46 @@ final class MarginStore: ObservableObject {
         crop = crop.integral
         guard crop.width >= 1, crop.height >= 1 else { return false }
         let outWidth = min(1600, Int(crop.width)), outHeight = Int((Double(outWidth) * ratio).rounded())
-        guard let data = Self.jpeg(cg, in: crop, width: outWidth, height: outHeight) else { return false }
+        guard let data = Self.webp(cg, in: crop, width: outWidth, height: outHeight, quality: 82) else { return false }
         try? FileManager.default.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
         guard (try? data.write(to: destination, options: .atomic)) != nil else { return false }
+        staleJPEG(beside: destination).map { if FileManager.default.fileExists(atPath: $0.path) { Discard.bookkeeping($0) } }
         coverCache[book] = nil
         coverVersion += 1
         onFilesChanged()
         return true
     }
 
-    /// Part of a picture, scaled to a size, as JPEG data.
-    private static func jpeg(_ image: CGImage, in crop: CGRect, width: Int, height: Int, quality: Double = 0.85) -> Data? {
+    /// Part of a picture, scaled to a size, as WebP data (quality 0 to 100). A picture with
+    /// see-through parts is set on white, as a printed cover would be.
+    private static func webp(_ image: CGImage, in crop: CGRect, width: Int, height: Int, quality: Float) -> Data? {
         guard width > 0, height > 0, let cropped = image.cropping(to: crop),
-              let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+              let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4,
                                       space: CGColorSpace(name: CGColorSpace.sRGB)!,
-                                      bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue) else { return nil }
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue),
+              let pixels = context.data else { return nil }
+        let frame = CGRect(x: 0, y: 0, width: width, height: height)
+        context.setFillColor(CGColor(gray: 1, alpha: 1))
+        context.fill(frame)
         context.interpolationQuality = .high
-        context.draw(cropped, in: CGRect(x: 0, y: 0, width: width, height: height))
-        guard let scaled = context.makeImage() else { return nil }
-        return NSBitmapImageRep(cgImage: scaled).representation(using: .jpeg, properties: [.compressionFactor: quality])
+        context.draw(cropped, in: frame)
+        var output: UnsafeMutablePointer<UInt8>?
+        let size = WebPEncodeRGBA(pixels.assumingMemoryBound(to: UInt8.self), Int32(width), Int32(height),
+                                  Int32(width * 4), quality, &output)
+        guard size > 0, let output else { return nil }
+        defer { WebPFree(output) }
+        return Data(bytes: output, count: size)
     }
 
     func removeCover(of book: URL) {
         guard let url = coverURL(for: book) else { return }
-        Discard.bookkeeping(url)
-        if let original = coverOriginalURL(for: book), FileManager.default.fileExists(atPath: original.path) {
-            try? Discard.toTrash(original)
+        let fm = FileManager.default
+        // Whichever form the cover and its picture are in (WebP, or JPEG from before it).
+        for file in [newCoverFile(book, original: false), staleJPEG(beside: url)].compactMap({ $0 }) where fm.fileExists(atPath: file.path) {
+            Discard.bookkeeping(file)
+        }
+        for file in [newCoverFile(book, original: true), coverOriginalURL(for: book).flatMap(staleJPEG(beside:))].compactMap({ $0 }) where fm.fileExists(atPath: file.path) {
+            try? Discard.toTrash(file)
         }
         coverCache[book] = nil
         coverVersion += 1

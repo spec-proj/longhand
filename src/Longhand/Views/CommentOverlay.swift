@@ -311,13 +311,32 @@ final class HighlightTextView: NSTextView {
         let index = characterIndex(for: screen)
         guard index != hoveredIndex else { return }
         hoveredIndex = index
-        guard index != NSNotFound, let range = NameMatch.range(at: index, in: string as NSString, among: nameRegexes) else {
+        // The text storage's own string: `string` can copy the whole page on every move.
+        guard index != NSNotFound, let text = textStorage?.mutableString,
+              let range = NameMatch.range(at: index, in: text, among: nameRegexes) else {
             setHoveredName(nil)
             return
         }
         // Only when the pointer is on the name itself, not on the empty end of its line.
         let point = convert(event.locationInWindow, from: nil)
         setHoveredName(lineRects(of: range).contains { $0.insetBy(dx: -2, dy: 0).contains(point) } ? range : nil)
+    }
+
+    /// Text or scrolling moved under the pointer: the name it was over may not be there.
+    override func didChangeText() {
+        super.didChangeText()
+        forgetHoveredName()
+    }
+
+    override func scrollWheel(with event: NSEvent) {
+        super.scrollWheel(with: event)
+        forgetHoveredName()
+    }
+
+    private func forgetHoveredName() {
+        guard hoveredName != nil || hoveredIndex != -1 else { return }
+        hoveredIndex = -1
+        setHoveredName(nil)
     }
 
     override func mouseExited(with event: NSEvent) {
@@ -336,7 +355,7 @@ final class HighlightTextView: NSTextView {
 
     /// A dotted line under the tracked name the pointer is over.
     private func drawHoveredName(in rect: NSRect) {
-        guard let range = hoveredName, NSMaxRange(range) <= (string as NSString).length else { return }
+        guard let range = hoveredName, NSMaxRange(range) <= (textStorage?.length ?? 0) else { return }
         PaperTheme.secondary.setStroke()
         for line in lineRects(of: range) {
             let trim = max(0, (line.height - Layout.textSize * 1.3) / 2)
